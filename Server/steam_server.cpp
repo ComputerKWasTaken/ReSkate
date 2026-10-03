@@ -163,10 +163,12 @@ bool SteamServer::start(const std::filesystem::path &folder, std::uint16_t port,
             module_ = dlopen("libsteam_api.so", RTLD_NOW);
             library = folder / "libsteam_api.so";
         }
-        if (!module_)
+        if (!module_) {
+            const char *details = dlerror();
             throw std::runtime_error("Cannot load " + library.string() +
-                                     ". Put libsteam_api.so (Steamworks SDK) next to the server. " +
-                                     (dlerror() ? dlerror() : ""));
+                                     ". Put libsteam_api.so (Steamworks SDK) next to the server." +
+                                     (details && details[0] ? std::string(" ") + details : ""));
+        }
         setenv("SteamAppId", "3354750", 1);
         setenv("SteamGameId", "3354750", 1);
 #endif

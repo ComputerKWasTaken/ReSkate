@@ -96,6 +96,8 @@ OverlayKeys overlay_keys() noexcept {
     return keys;
 }
 
+#endif // _WIN32
+
 bool offline_mode() noexcept {
 #ifdef _WIN32
     static const bool offline = [] {
@@ -135,7 +137,8 @@ std::uint64_t offline_steam_id() noexcept {
         char* end{};
         const auto parsed = std::strtoull(value, &end, 10);
         // Individual accounts in the public universe only.
-        return end && *end == '\0' && (parsed >> 52) == 0x011 ? parsed : fallback;
+        if (!end || *end != '\0' || (static_cast<std::uint64_t>(parsed) >> 52) != 0x011) return fallback;
+        return static_cast<std::uint64_t>(parsed);
     }();
     return id;
 }
