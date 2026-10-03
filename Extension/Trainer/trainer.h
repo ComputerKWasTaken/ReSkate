@@ -62,6 +62,8 @@ struct View {
     bool pad_shortcuts{true};
     // Height of the hippy jump, which the game scripts instead of tuning (x of its own height).
     float hippy_height{1};
+    // The same for the no comply and the boneless.
+    float nocomply_height{1}, boneless_height{1};
     // HUD
     bool hud{}, hud_jump{true}, logging{};
     // The loaded map and what its author ships for the trainer (Mods/<mod>/trainer.json).

@@ -27,7 +27,7 @@ const std::vector<Link> &value_links() {
 }
 // Only values that do something: read by the game, or linked above.
 std::string_view essential_name(std::string_view key, int *rank) {
-    static constexpr std::array<std::pair<std::string_view, std::string_view>, 21> names{{
+    static constexpr std::array<std::pair<std::string_view, std::string_view>, 20> names{{
         {"physicsmode.jumpmaxheight", "Ollie height (max)"},
         {"physicsmode.jumpminheight", "Ollie height (min, light pop)"},
         {"physicsmode.grindjumpcommonmax", "Pop out of grinds (max)"},
@@ -38,8 +38,7 @@ std::string_view essential_name(std::string_view key, int *rank) {
         {"physicsairstates.maxspinspeed", "Body spin speed"},
         {"physicsmode.maxautobodyspinspeed", "Auto body spin speed"},
         {"physicsmode.easybodyspins", "Easy body spins"},
-        {"physicspush.maxpushablespeed", "Top pushing speed (m/s)"},
-        {"physicsmode.maxpushdvstart", "Push strength"},
+        {"physicspush.maxpushablespeed", "Top pushing speed (m/s, hold push)"},
         {"physicsmode.autopushenabled", "Auto push"},
         {"physicsmode.speedwobblestartspeed", "Speed wobble starts at (m/s)"},
         {"physicsmode.grindlockdist", "Grind lock-on distance"},
@@ -63,7 +62,8 @@ const std::vector<BuiltinPreset> &builtin_presets() {
         // Rules name values the game was found to read (trainer_used.inc) or linked values
         // (value_links). Jump height comes from the PhysicsJump height graphs; body flips
         // from FlipScalar and FlipMaxSpeed unless PerfectBodyFlips forces exactly one rotation;
-        // body spins from the PhysicsBodyspin graphs and MaxAutoBodySpinSpeed.
+        // body spins from the PhysicsBodyspin graphs and MaxAutoBodySpinSpeed. The top pushing
+        // speed is the trainer's own doing (set_push_top); the game skips its other push values.
         {"Super Ollie", "Huge ollies: about three times the height at any speed.",
          {{"physicsmode.jumpmaxheight", true, 3.0}, {"physicsmode.jumpminheight", true, 3.0},
           {"physicsjump.absoluteminheight", true, 2.0}, {"physicsjump.jumpybonusmax", true, 3.0},
@@ -76,16 +76,16 @@ const std::vector<BuiltinPreset> &builtin_presets() {
         {"Realistic", "Lower pop, slower pushing and rotation, earlier speed wobble, easier to bail.",
          {{"physicsmode.jumpmaxheight", true, 0.75}, {"physicsmode.jumpminheight", true, 0.8},
           {"physicsmode.grindjump", true, 0.8}, {"physicspush.maxpushablespeed !camera", true, 0.75},
-          {"physicsmode.maxpushdv", true, 0.8}, {"physicsmode.speedwobblestartspeed", true, 0.7},
+          {"physicsmode.speedwobblestartspeed", true, 0.7},
           {"physicsreckoning.flipscalar", true, 0.8}, {"physicsairstates.maxspinspeed", true, 0.75},
           {"physicsmode.maxautobodyspinspeed", true, 0.75}, {"physicsmode.grindlockdist", true, 0.7},
           {"physicswipeout.wipeout_ maxspeed", true, 0.8}, {"physicsmode.wipeout_ acceleration", true, 0.8}}},
         {"Mega Pop", "Ollies and grind pops go about twice as high.",
          {{"physicsmode.jumpmaxheight", true, 2.0}, {"physicsmode.jumpminheight", true, 1.6},
           {"physicsjump.jumpybonusmax", true, 2.0}, {"physicsmode.grindjump", true, 1.6}}},
-        {"Fast", "Push to a higher top speed and get there sooner.",
+        {"Fast", "Hold push to reach a much higher top speed.",
          {{"physicspush.maxpushablespeed !camera", true, 1.8}, {"physicspush.maxspeedforautopush", true, 1.8},
-          {"physicsmode.maxpushdv", true, 1.6}, {"physicsmode.speedwobblestartspeed", true, 3.0}}},
+          {"physicsmode.speedwobblestartspeed", true, 3.0}}},
         {"No Speed Wobble", "The board stays steady at any speed.", {{"physicsmode.speedwobblestartspeed", true, 20.0}}},
         {"Auto Push", "The skater keeps pushing without input.", {{"physicsmode.autopushenabled", false, 1.0}}},
         {"Hard To Bail", "Much larger impacts are needed before a wipeout.",

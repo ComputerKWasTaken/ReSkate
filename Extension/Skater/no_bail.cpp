@@ -64,7 +64,8 @@ Protection& protection() { static auto* value = new Protection; return *value; }
 struct StateWatch {
     std::atomic<std::uintptr_t> selector{};
     std::atomic<std::uint64_t> until{}, changes{}, wipeouts{};
-    std::atomic<std::uint32_t> state{};
+    std::atomic<std::uint32_t> state{}, previous{};
+    std::atomic<std::int64_t> since{}, previous_ticks{}; // performance-counter ticks
 };
 StateWatch& state_watch() { static auto* value = new StateWatch; return *value; }
 
@@ -198,7 +199,11 @@ std::uint32_t choose_state(std::uintptr_t selector, std::uint32_t current) {
     const auto chosen = filtered && next == wipeout_physics_state && protected_owner(selector, &Owner::selector) ? current : next;
     auto& w = state_watch();
     if (selector == w.selector.load(std::memory_order_acquire) && GetTickCount64() < w.until.load(std::memory_order_acquire)) {
-        if (w.state.exchange(chosen, std::memory_order_acq_rel) != chosen) {
+        if (const auto before = w.state.exchange(chosen, std::memory_order_acq_rel); before != chosen) {
+            LARGE_INTEGER now{};
+            QueryPerformanceCounter(&now);
+            w.previous.store(before, std::memory_order_relaxed);
+            w.previous_ticks.store(now.QuadPart - w.since.exchange(now.QuadPart, std::memory_order_relaxed), std::memory_order_relaxed);
             w.changes.fetch_add(1, std::memory_order_relaxed);
             if (chosen == wipeout_physics_state) w.wipeouts.fetch_add(1, std::memory_order_relaxed);
         }
@@ -400,6 +405,9 @@ PhysicsStateWatch watched_physics_state() noexcept {
     result.valid = protection().ready.load(std::memory_order_acquire) && w.selector.load(std::memory_order_acquire) &&
         GetTickCount64() < w.until.load(std::memory_order_acquire);
     result.state = w.state.load(std::memory_order_acquire);
+    result.previous = w.previous.load(std::memory_order_relaxed);
+    static const double frequency = [] { LARGE_INTEGER value{}; QueryPerformanceFrequency(&value); return static_cast<double>(value.QuadPart); }();
+    result.previous_seconds = static_cast<float>(static_cast<double>(w.previous_ticks.load(std::memory_order_relaxed)) / frequency);
     result.changes = w.changes.load(std::memory_order_relaxed);
     result.wipeouts = w.wipeouts.load(std::memory_order_relaxed);
     return result;

@@ -19,6 +19,8 @@ void update_board_lock(std::uintptr_t client, std::uintptr_t entity, bool locked
 struct PhysicsStateWatch {
     bool valid{};
     std::uint32_t state{};
+    std::uint32_t previous{}; // the state before this one
+    float previous_seconds{}; // how long that one lasted
     std::uint64_t changes{}, wipeouts{}; // counted since the process started
 };
 void watch_physics_state(std::uintptr_t client, std::uintptr_t entity) noexcept;

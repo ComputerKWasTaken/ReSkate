@@ -20,6 +20,10 @@ struct JumpScaleResult {
     float up_speed{}; // before scaling
 };
 JumpScaleResult take_jump_scale_result() noexcept;
+// Trainer: the local skater's top pushing speed as a multiple of the game's own (1 leaves the
+// skater alone); `stock` is the game's top pushing speed in m/s. Publish every client tick: it
+// expires after 500 ms.
+void set_push_top(std::uintptr_t client, std::uintptr_t entity, float top, float stock) noexcept;
 // Engine-thread-only interactive controls. Presentation callbacks only queue requests.
 overlay::DebugModel on_client_debug_tick(std::uintptr_t base, std::uintptr_t client,
     bool can_control, bool camera_phase_observed, const overlay::DebugRequest* request = nullptr,

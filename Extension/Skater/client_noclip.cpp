@@ -211,11 +211,69 @@ void trainer_apply_jump_scale(std::uintptr_t core) noexcept {
         j.outcome.store(scaled ? 2 : before < 0.5f ? -1 : -2);
     } catch (...) { j.outcome.store(-3); }
 }
+// The trainer's top pushing speed. On the board the game holds the skater at the speed its
+// trick scripts ask for (context +0x17f4: 4 m/s for taps, then about 5, 7, 8.5 and 9.1 m/s as
+// a push is held) and never runs its own code for the push tuning values. So, after each
+// physics step while the skater rides with such a target: at the game's last step the skater
+// carries on to `top` times it, and a `top` under 1 holds every step down to that share of
+// the last one. The game's choice of step is left alone: it follows the skater's speed, and a
+// multiplier on every step feeds back into it (measured: x2 ran away to 17 m/s).
+constexpr float push_gain = 0.2f;  // m/s the game's own push gains each physics step (0 to 4 m/s in 19 steps)
+constexpr float last_step = 0.95f; // of the stock top pushing speed: the game's last step is 9.1 of 9.25 m/s
+struct PushTop {
+    std::atomic<float> top{1}, stock{9.25f};
+    std::uintptr_t client{}, entity{};
+    std::atomic<ULONGLONG> expires{};
+};
+PushTop& push_top() { static auto* value = new PushTop; return *value; }
+void trainer_push_top(std::uintptr_t core) noexcept {
+    auto& p = push_top();
+    const float top = p.top.load(std::memory_order_relaxed);
+    if (top == 1 || GetTickCount64() >= p.expires.load(std::memory_order_acquire)) return;
+    const auto watch = watched_physics_state();
+    if (!watch.valid || watch.state != 100) return; // riding the ground
+    SourceLastError error;
+    auto& state = source_state();
+    if (!state.initialized.load(std::memory_order_acquire) || state.busy.test_and_set(std::memory_order_acquire)) return;
+    SourceBusyScope scope{state.busy};
+    try {
+        const auto bodies = debug_noclip_bodies(state.trial.base, p.client, p.entity);
+        if (bodies.core != core || bodies.offboard || bodies.parts.empty()) return;
+        SourceReader reader;
+        const float target = reader.value<float>(bodies.context, 0x17f4);
+        std::array<std::array<float, 3>, 32> velocities{};
+        std::array<std::uint32_t, 32> flags{};
+        const auto count = std::min<std::size_t>(bodies.parts.size(), velocities.size());
+        for (std::size_t i = 0; i < count; ++i) {
+            velocities[i] = reader.value<std::array<float, 3>>(bodies.parts[i], 0x70);
+            flags[i] = reader.value<std::uint32_t>(bodies.parts[i], 0x60);
+        }
+        reader.verify();
+        if (!(target > 0.5f) || !(target < 100.0f)) return;
+        const float speed = std::sqrt(velocities[0][0] * velocities[0][0] + velocities[0][2] * velocities[0][2]);
+        if (!(speed >= 0.5f) || !(speed < 1000.0f)) return;
+        const float stock = p.stock.load(std::memory_order_relaxed);
+        float change = 0;
+        if (top > 1 && target >= stock * last_step && speed >= target * 0.9f) change = std::min(push_gain, target * top - speed);
+        // Pushed speed only: a hill's is faster than the game's target and is left alone.
+        else if (top < 1 && speed > stock * top && speed <= target * 1.1f) change = -std::min(push_gain, speed - stock * top);
+        if (std::abs(change) < 0.005f) return;
+        const float scale = (speed + change) / speed;
+        // Like the native velocity writers: XYZ at +70 and the dirty bit 8 at +60.
+        for (std::size_t i = 0; i < count; ++i) {
+            velocities[i][0] *= scale;
+            velocities[i][2] *= scale;
+            body_write(bodies.parts[i] + 0x70, velocities[i]);
+            body_write(bodies.parts[i] + 0x60, flags[i] | 8u);
+        }
+    } catch (...) {}
+}
 void noclip_physics_update(std::uintptr_t core) {
     const auto original = source_state().velocity_update_original.load(std::memory_order_acquire);
     if (original) original(core);
     noclip_apply_velocity(core);
     trainer_apply_jump_scale(core);
+    trainer_push_top(core);
 }
 bool noclip_motion_target(std::uintptr_t rig, std::uintptr_t context,
     const std::array<float,16>* supplied, std::array<float,16>& target) noexcept {
@@ -295,6 +353,14 @@ bool queue_jump_scale(std::uintptr_t client, std::uintptr_t entity, float factor
         j.pending.store(true, std::memory_order_release);
         return true;
     } catch (...) { return false; }
+}
+void set_push_top(std::uintptr_t client, std::uintptr_t entity, float top, float stock) noexcept {
+    auto& p = push_top();
+    p.client = client;
+    p.entity = entity;
+    p.stock.store(stock > 1 && stock < 100 ? stock : 9.25f, std::memory_order_relaxed);
+    p.top.store(top > 0.05f && top <= 20 ? top : 1.0f, std::memory_order_relaxed);
+    p.expires.store(GetTickCount64() + 500, std::memory_order_release);
 }
 JumpScaleResult take_jump_scale_result() noexcept {
     auto& j = jump_scale();

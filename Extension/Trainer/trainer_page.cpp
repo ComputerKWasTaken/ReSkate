@@ -29,8 +29,8 @@ struct Page {
     std::array<char, 49> preset_name{};
     std::array<float, 3> teleport{};
     double speed_edit{-1}, speed_until{};
-    float hippy_edit{1};
-    bool hippy_editing{};
+    float hippy_edit{1}, nocomply_edit{1}, boneless_edit{1};
+    bool hippy_editing{}, nocomply_editing{}, boneless_editing{};
     std::uint64_t open_serial{}; // the last `trainer open` acted on
     bool show_page{};
 };
@@ -183,7 +183,7 @@ void tune_tab(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const trai
     ImGui::SameLine();
     if (p.hidden_unused) ImGui::TextDisabled("%zu shown, %zu changed, %zu hidden", p.shown.size(), view.touched, p.hidden_unused);
     else ImGui::TextDisabled("%zu shown, %zu changed", p.shown.size(), view.touched);
-    // The hippy jump's height is not a tuning value; it sits with the Essentials.
+    // These trick heights are not tuning values; they sit with the Essentials.
     if (p.group == 0 && p.search[0] == 0 && !p.only_changed) trick_heights(menu, callbacks, p, view);
     const bool with_group = p.search[0] != 0 || p.group <= 1 || p.only_changed;
     const bool friendly = p.group == 0 && p.search[0] == 0 && !p.only_changed;
@@ -198,7 +198,7 @@ void tune_tab(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const trai
 }
 
 void trick_heights(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const trainer::View &view) {
-    begin_card(menu, "trick-heights", "HIPPY JUMP", "1.0 is the game's own height");
+    begin_card(menu, "trick-heights", "TRICK HEIGHTS", "1.0 is the game's own height");
     const auto slider = [&](const char *label, const char *option, float value, float &edit, bool &editing) {
         field(menu, label);
         ImGui::PushID(option);
@@ -211,8 +211,10 @@ void trick_heights(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const
         if (!ImGui::IsItemActive() && editing && std::abs(value - edit) < 0.005f) editing = false;
         ImGui::PopID();
     };
+    slider("No comply height", "nocomply_height", view.nocomply_height, p.nocomply_edit, p.nocomply_editing);
+    slider("Boneless height", "boneless_height", view.boneless_height, p.boneless_edit, p.boneless_editing);
     slider("Hippy jump height", "hippy_height", view.hippy_height, p.hippy_edit, p.hippy_editing);
-    note("Separate from ollie height because the game sets it in its trick scripts.");
+    note("Separate from ollie height because the game sets these in its trick scripts.");
     end_card();
 }
 void presets_tab(SkateMenu &menu, const Model &model, const CallbacksV3 &callbacks, Page &p, const trainer::View &view) {

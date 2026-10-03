@@ -22,7 +22,7 @@ void register_trainer_commands(Commands &registry) {
         {"marker", "Save, go to or clear a marker", "save|go|clear [slot]", false},
         {"tp", "Teleport the skater", "<x> <y> <z>", false},
         {"spot", "Go to one of the map author's spots", "<number>", false},
-        {"option", "Trainer options", "hud|hud_jump|auto_return|pad|log 0|1, return_delay <seconds>, hippy_height <x>", true},
+        {"option", "Trainer options", "hud|hud_jump|auto_return|pad|log 0|1, return_delay <seconds>, hippy_height|nocomply_height|boneless_height <x>", true},
         {"profile", "The preset this map applies on load", "set <preset>|clear", false},
         {"jumps", "The last measured jump", nullptr, false},
         {"where", "The skater's position, heading and speed", nullptr, false},

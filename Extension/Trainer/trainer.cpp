@@ -1,4 +1,5 @@
 #include "trainer.h"
+#include "trainer_jump.h"
 #include "trainer_presets.h"
 #include "Engine/Core/Json/json.h"
 #include "Engine/Core/Log/logging.h"
@@ -105,6 +106,8 @@ struct State {
     // The hippy jump's height is set by the game's trick scripts, not by tuning: the trainer
     // scales the upward velocity when it sees one start.
     float hippy_height{1};
+    // The no comply and the boneless are launched by the trick scripts too (trainer_jump.cpp).
+    float nocomply_height{1}, boneless_height{1};
     std::uint32_t last_state{};
     float boost_factor{}; // velocity factor of the hippy jump now starting, 0: none
     std::uint64_t boost_until{};
@@ -206,6 +209,8 @@ void load_store() {
             s.hud_jump = o.value("hud_jump", true);
             s.return_delay = std::clamp(o.value("return_delay", 1.5f), 0.0f, 10.0f);
             s.hippy_height = std::clamp(o.value("hippy_height", 1.0f), 0.25f, 20.0f);
+            s.nocomply_height = std::clamp(o.value("nocomply_height", 1.0f), 0.25f, 20.0f);
+            s.boneless_height = std::clamp(o.value("boneless_height", 1.0f), 0.25f, 20.0f);
             s.slot = std::clamp(o.value("slot", 0), 0, static_cast<int>(marker_slots) - 1);
         }
         if (json->contains("values") && json->at("values").is_object())
@@ -248,6 +253,8 @@ void save_store() {
         options["hud_jump"] = s.hud_jump;
         options["return_delay"] = s.return_delay;
         options["hippy_height"] = s.hippy_height;
+        options["nocomply_height"] = s.nocomply_height;
+        options["boneless_height"] = s.boneless_height;
         options["slot"] = s.slot;
         json["options"] = std::move(options);
         Json values = Json::object();
@@ -1081,6 +1088,8 @@ void build_view() {
     next->slot = s.slot;
     next->auto_return = s.auto_return;
     next->hippy_height = s.hippy_height;
+    next->nocomply_height = s.nocomply_height;
+    next->boneless_height = s.boneless_height;
     next->return_delay = s.return_delay;
     next->pad_shortcuts = s.pad_shortcuts;
     next->hud = s.hud;
@@ -1133,6 +1142,22 @@ void tick(std::uintptr_t base, std::uintptr_t client, bool playing, const std::s
             s.motion.valid = false;
             s.entity = 0;
         }
+        (void)start_trick_heights(base);
+        // Like the hippy jump's, these are boosts: a session that turns boosts off turns them off.
+        const bool boosts = !multiplayer_session_active() || session_boosts_allowed();
+        set_trick_heights(boosts ? s.nocomply_height : 1.0f, boosts ? s.boneless_height : 1.0f);
+        // Pushing aims for speeds the trick scripts set and the game's code for its push tuning
+        // is skipped: the top pushing speed is kept as the player's number and handed over as
+        // a multiple of the stock one.
+        const auto ratio = [&](std::string_view id) {
+            const auto *e = find_entry(id);
+            return e && e->touched && e->stock > 0 && editable() ? static_cast<float>(e->value / e->stock) : 1.0f;
+        };
+        const auto *top_speed = find_entry("physicspush.maxpushablespeed");
+        set_push_top(client, s.entity, boosts ? ratio("physicspush.maxpushablespeed") : 1.0f, top_speed ? static_cast<float>(top_speed->stock) : 0.0f);
+        for (TrickLaunch launch; take_trick_launch(launch);)
+            say(logging::Level::info, std::format("Trainer trick: {} launched at {:.2f} m/s up, x{:.2f}.",
+                                                  launch.trick == Trick::boneless ? "boneless" : "no comply", launch.up_speed, launch.factor));
         hold(now);
         run_selftest(now);
         publish(s.telemetry);
@@ -1264,10 +1289,11 @@ std::string run(std::string_view verb, const std::vector<std::string> &a) {
     if (v == "option") {
         const auto name = lower(arg(0));
         bool on{};
-        if (name == "hippy_height") {
+        if (name == "hippy_height" || name == "nocomply_height" || name == "boneless_height") {
             const auto value = number(arg(1));
-            if (!value) return "error: hippy_height needs a multiplier, 1 = the game's own height.";
-            s.hippy_height = std::clamp(static_cast<float>(*value), 0.25f, 20.0f);
+            if (!value) return "error: " + name + " needs a multiplier, 1 = the game's own height.";
+            (name == "hippy_height" ? s.hippy_height : name == "nocomply_height" ? s.nocomply_height : s.boneless_height) =
+                std::clamp(static_cast<float>(*value), 0.25f, 20.0f);
         } else if (name == "return_delay") {
             const auto value = number(arg(1));
             if (!value) return "error: return_delay needs seconds.";
