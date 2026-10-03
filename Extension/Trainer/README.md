@@ -9,9 +9,9 @@ telemetry HUD. It ships no game data: the list of values is built at run time fr
 | Tab | What you get |
 |---|---|
 | **TUNE** | An Essentials list of 21 plainly named values (ollie height, top speed, body flip and spin speed, grind lock-on...), then every plain value of the game's physics tuning (about 760), plus one multiplier for each of its 169 curves and graphs. Search, filter by group, "only what I changed", lock, reset. Changes apply while you skate. Values that no game code was found reading are hidden unless you ask for them. |
-| **PRESETS** | Quick switches for super high ollie, fast flips, fast spins and never bail. Built-in presets you switch on and off, and that stack (Super Ollie, Fast Flips, Fast Spins, Mega Pop, Fast, Hard To Bail, Sticky Grinds, ...), your own saved presets, and a preset a map applies every time it loads. |
+| **PRESETS** | Quick switches for super high ollie, fast flips, fast spins and never bail, and a hippy jump height slider. Built-in presets you switch on and off, and that stack (Super Ollie, Fast Flips, Fast Spins, Realistic, Mega Pop, Fast, Hard To Bail, Sticky Grinds, ...), your own saved presets, and a preset a map applies every time it loads. |
 | **PRACTICE** | Game speed and pause, five marker slots per map (save / go / clear), return to the marker after a bail, teleport to coordinates, copy your position (game or Blender axes). |
-| **MAP & HUD** | Speed and air-time HUD, a read-out after every jump (takeoff speed and angle, height, distance, drop, landing speed), telemetry recording to CSV, and whatever the map's author ships for the trainer. |
+| **MAP & HUD** | Speed and air-time HUD, a read-out after every jump (takeoff speed and angle, height, distance, drop, landing speed, spin and flip), telemetry recording to CSV, and whatever the map's author ships for the trainer. |
 
 Controller: hold **LB + RB**, then D-pad **up** saves the marker, **down** goes to it, **left / right**
 pick the slot.
@@ -90,4 +90,6 @@ folder>` (CMake option `DINGOSDK_BUILD_TRAINER_TESTS`) lists the tuning values w
   flips from `PhysicsReckoning.FlipScalar` and `FlipMaxSpeed` (`PerfectBodyFlips` forces exactly one
   rotation and ignores them), body spins from the `PhysicsBodyspin` graphs. "No use found" is not
   proof: the pass can miss a use.
+- Hippy jump height works by scaling the skater's upward speed as the jump starts. No comply and
+  boneless heights are not adjustable: the game moves those along a scripted path.
 - Built for one game build (the one ReSkate 1.0.3 supports). A game update needs a new build.

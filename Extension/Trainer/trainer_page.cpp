@@ -29,9 +29,12 @@ struct Page {
     std::array<char, 49> preset_name{};
     std::array<float, 3> teleport{};
     double speed_edit{-1}, speed_until{};
+    float hippy_edit{1};
+    bool hippy_editing{};
     std::uint64_t open_serial{}; // the last `trainer open` acted on
     bool show_page{};
 };
+void trick_heights(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const trainer::View &view);
 Page &page() {
     static auto *value = new Page;
     return *value;
@@ -180,6 +183,8 @@ void tune_tab(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const trai
     ImGui::SameLine();
     if (p.hidden_unused) ImGui::TextDisabled("%zu shown, %zu changed, %zu hidden", p.shown.size(), view.touched, p.hidden_unused);
     else ImGui::TextDisabled("%zu shown, %zu changed", p.shown.size(), view.touched);
+    // The hippy jump's height is not a tuning value; it sits with the Essentials.
+    if (p.group == 0 && p.search[0] == 0 && !p.only_changed) trick_heights(menu, callbacks, p, view);
     const bool with_group = p.search[0] != 0 || p.group <= 1 || p.only_changed;
     const bool friendly = p.group == 0 && p.search[0] == 0 && !p.only_changed;
     ImGui::BeginChild("tune-rows", ImVec2(0, 0), ImGuiChildFlags_None);
@@ -192,6 +197,24 @@ void tune_tab(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const trai
     ImGui::EndChild();
 }
 
+void trick_heights(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const trainer::View &view) {
+    begin_card(menu, "trick-heights", "HIPPY JUMP", "1.0 is the game's own height");
+    const auto slider = [&](const char *label, const char *option, float value, float &edit, bool &editing) {
+        field(menu, label);
+        ImGui::PushID(option);
+        float shown = editing ? edit : value;
+        if (ImGui::SliderFloat("##height", &shown, 0.5f, 10.0f, "x %.2f", ImGuiSliderFlags_AlwaysClamp)) {
+            edit = shown;
+            editing = true;
+        }
+        if (ImGui::IsItemDeactivatedAfterEdit()) trainer_command(menu, callbacks, std::format("option {} {:.2f}", option, edit));
+        if (!ImGui::IsItemActive() && editing && std::abs(value - edit) < 0.005f) editing = false;
+        ImGui::PopID();
+    };
+    slider("Hippy jump height", "hippy_height", view.hippy_height, p.hippy_edit, p.hippy_editing);
+    note("Separate from ollie height because the game sets it in its trick scripts.");
+    end_card();
+}
 void presets_tab(SkateMenu &menu, const Model &model, const CallbacksV3 &callbacks, Page &p, const trainer::View &view) {
     if (!view.editable && !view.blocked.empty()) warn(view.blocked.c_str());
     begin_card(menu, "quick", "QUICK", "The ones everybody wants");
@@ -217,6 +240,7 @@ void presets_tab(SkateMenu &menu, const Model &model, const CallbacksV3 &callbac
             debug_request(menu, callbacks, {DebugAction::set_no_bail, no_bail});
     }
     end_card();
+    trick_heights(menu, callbacks, p, view);
     begin_card(menu, "presets", "PRESETS", "Switch any of them on and off; they stack");
     ImGui::BeginDisabled(!view.ready || !view.editable);
     const float button = ImGui::CalcTextSize("Turn off").x + ImGui::GetStyle().FramePadding.x * 2;
@@ -370,6 +394,7 @@ void jump_lines(SkateMenu &menu, const trainer::Jump &jump) {
     info(menu, "Distance", std::format("{:.2f} m, {:.2f} m drop", jump.distance, jump.drop));
     info(menu, "Landing", std::format("{:.1f} km/h at {:.1f}, {:.1f}, {:.1f}", jump.landing_speed * 3.6f, jump.landing[0], jump.landing[1],
                                       jump.landing[2]));
+    info(menu, "Rotation", std::format("spin {:.0f} degrees (peak {:.0f} per second), flip {:.0f} degrees", jump.spin, jump.spin_rate, jump.flip));
 }
 void map_tab(SkateMenu &menu, const CallbacksV3 &callbacks, const trainer::View &view) {
     const auto telemetry = trainer::telemetry();
@@ -486,6 +511,7 @@ void draw_trainer_hud() {
         lines.push_back(std::format("jump {}:  {:.1f} km/h at {:.0f} deg", jump.serial, jump.takeoff_speed * 3.6f, jump.takeoff_angle));
         lines.push_back(std::format("{:.2f} s   {:.2f} m high   {:.2f} m far", jump.air_time, jump.height, jump.distance));
         lines.push_back(std::format("landed at {:.1f} km/h, {:.2f} m lower", jump.landing_speed * 3.6f, jump.drop));
+        if (jump.spin >= 45.0f || jump.flip >= 90.0f) lines.push_back(std::format("spin {:.0f} deg   flip {:.0f} deg", jump.spin, jump.flip));
     }
     if (lines.empty()) return;
     auto *draw = ImGui::GetForegroundDrawList();

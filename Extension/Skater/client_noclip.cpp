@@ -181,10 +181,41 @@ void noclip_apply_velocity(std::uintptr_t core) noexcept {
     } catch (const SourceGuard& issue) { debug_stop_noclip(debug); debug.status = issue.message; }
       catch (...) { debug_stop_noclip(debug); debug.status = "Flight stopped after a physics error."; }
 }
+struct JumpScale {
+    std::atomic<bool> pending{};
+    std::uintptr_t client{}, entity{}, core{};
+    ULONGLONG expires{};
+    float factor{1};
+    std::atomic<int> outcome{};
+    std::atomic<float> up_speed{};
+};
+JumpScale& jump_scale() { static auto* value = new JumpScale; return *value; }
+// The trainer's hippy jump height: scale the upward velocity the game gave the off-board skater.
+void trainer_apply_jump_scale(std::uintptr_t core) noexcept {
+    auto& j = jump_scale();
+    if (!j.pending.load(std::memory_order_acquire) || j.core != core) return;
+    SourceLastError error;
+    auto& state = source_state();
+    if (!state.initialized.load(std::memory_order_acquire) || state.busy.test_and_set(std::memory_order_acquire)) return;
+    SourceBusyScope scope{state.busy};
+    j.pending.store(false, std::memory_order_release);
+    try {
+        if (GetTickCount64() >= j.expires) { j.outcome.store(-3); return; }
+        const auto bodies = debug_noclip_bodies(state.trial.base, j.client, j.entity);
+        source_require(bodies.core == core, "Skater physics was replaced.");
+        // On the board the game drives a jump along its own path and undoes a velocity change.
+        if (!bodies.offboard) { j.outcome.store(-2); return; }
+        float before{};
+        const bool scaled = scale_offboard_up_velocity(state.trial.base, core, bodies.context, bodies.rig_wrapper, j.factor, &before);
+        j.up_speed.store(before);
+        j.outcome.store(scaled ? 2 : before < 0.5f ? -1 : -2);
+    } catch (...) { j.outcome.store(-3); }
+}
 void noclip_physics_update(std::uintptr_t core) {
     const auto original = source_state().velocity_update_original.load(std::memory_order_acquire);
     if (original) original(core);
     noclip_apply_velocity(core);
+    trainer_apply_jump_scale(core);
 }
 bool noclip_motion_target(std::uintptr_t rig, std::uintptr_t context,
     const std::array<float,16>* supplied, std::array<float,16>& target) noexcept {
@@ -246,6 +277,30 @@ void noclip_skater_motion(std::uintptr_t rig, std::uintptr_t context,
 
 namespace dingosdk {
 using namespace client_source::detail;
+
+bool queue_jump_scale(std::uintptr_t client, std::uintptr_t entity, float factor) noexcept {
+    SourceLastError error;
+    try {
+        auto& state = source_state();
+        auto& j = jump_scale();
+        if (!state.initialized.load(std::memory_order_acquire) || !state.velocity_guard_active.load(std::memory_order_acquire) ||
+            !std::isfinite(factor) || factor <= 0 || factor > 20 || j.pending.load(std::memory_order_acquire)) return false;
+        const auto bodies = debug_noclip_bodies(state.trial.base, client, entity);
+        j.client = client;
+        j.entity = entity;
+        j.core = bodies.core;
+        j.factor = factor;
+        j.expires = GetTickCount64() + 150;
+        j.outcome.store(0);
+        j.pending.store(true, std::memory_order_release);
+        return true;
+    } catch (...) { return false; }
+}
+JumpScaleResult take_jump_scale_result() noexcept {
+    auto& j = jump_scale();
+    if (j.pending.load(std::memory_order_acquire)) return {};
+    return {j.outcome.exchange(0), j.up_speed.load()};
+}
 
 bool start_client_noclip_velocity(std::uintptr_t base) noexcept {
     SourceLastError error;

@@ -60,6 +60,8 @@ struct View {
     bool auto_return{};
     float return_delay{1.5f};
     bool pad_shortcuts{true};
+    // Height of the hippy jump, which the game scripts instead of tuning (x of its own height).
+    float hippy_height{1};
     // HUD
     bool hud{}, hud_jump{true}, logging{};
     // The loaded map and what its author ships for the trainer (Mods/<mod>/trainer.json).
@@ -73,6 +75,9 @@ struct View {
 struct Jump {
     std::uint64_t serial{}; // 0: none yet
     float takeoff_speed{}, takeoff_angle{}, air_time{}, height{}, distance{}, drop{}, landing_speed{};
+    float spin{}, spin_rate{}; // degrees turned about the vertical in the air, and the fastest rate (deg/s)
+    float flip{};              // degrees the skater's up axis tumbled (body flips and rolls)
+    std::uint32_t state{};     // the physics state it took off into (tells trick kinds apart)
     std::array<float, 3> takeoff{}, landing{};
 };
 // Changes every client tick.

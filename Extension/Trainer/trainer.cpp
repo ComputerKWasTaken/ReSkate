@@ -7,6 +7,7 @@
 #include "Engine/Game/Build/20260929/physics_tuning.h"
 #include "Engine/Game/Multiplayer/session_tools.h"
 #include "Extension/Profile/local_profile_runtime.h"
+#include "Extension/Skater/client_source_spawn.h"
 #include "Extension/Skater/client_source_spawn_internal.h"
 #include "Extension/Skater/no_bail.h"
 #include "Extension/Skater/physics_tuning.h"
@@ -75,6 +76,10 @@ struct Motion {
     Vec3 takeoff{}, takeoff_velocity{};
     std::int64_t takeoff_stamp{};
     float apex{};
+    bool axes_valid{};
+    Vec3 forward{}, up{};
+    float spin{}, spin_rate{}, flip{};
+    std::uint32_t air_state{}, ground_state{};
 };
 struct State {
     bool loaded{}; // the store was read
@@ -97,6 +102,12 @@ struct State {
     MapFile map_file;
     int slot{};
     bool auto_return{}, pad_shortcuts{true}, hud{}, hud_jump{true}, logging{};
+    // The hippy jump's height is set by the game's trick scripts, not by tuning: the trainer
+    // scales the upward velocity when it sees one start.
+    float hippy_height{1};
+    std::uint32_t last_state{};
+    float boost_factor{}; // velocity factor of the hippy jump now starting, 0: none
+    std::uint64_t boost_until{};
     float return_delay{1.5f};
     std::uint64_t seen_wipeouts{}, return_at{}, open_serial{};
     int open_tab{};
@@ -194,6 +205,7 @@ void load_store() {
             s.hud = o.value("hud", false);
             s.hud_jump = o.value("hud_jump", true);
             s.return_delay = std::clamp(o.value("return_delay", 1.5f), 0.0f, 10.0f);
+            s.hippy_height = std::clamp(o.value("hippy_height", 1.0f), 0.25f, 20.0f);
             s.slot = std::clamp(o.value("slot", 0), 0, static_cast<int>(marker_slots) - 1);
         }
         if (json->contains("values") && json->at("values").is_object())
@@ -235,6 +247,7 @@ void save_store() {
         options["hud"] = s.hud;
         options["hud_jump"] = s.hud_jump;
         options["return_delay"] = s.return_delay;
+        options["hippy_height"] = s.hippy_height;
         options["slot"] = s.slot;
         json["options"] = std::move(options);
         Json values = Json::object();
@@ -778,13 +791,19 @@ void finish_jump(const Vec3 &landing, float landing_speed, std::int64_t landed_a
     jump.distance = horizontal({landing[0] - m.takeoff[0], 0, landing[2] - m.takeoff[2]});
     jump.drop = m.takeoff[1] - landing[1];
     jump.landing_speed = landing_speed;
+    jump.spin = std::abs(m.spin);
+    jump.spin_rate = m.spin_rate;
+    jump.flip = m.flip;
+    jump.state = m.air_state;
     s.telemetry.last = jump;
     if (jump.distance > s.telemetry.best.distance) s.telemetry.best = jump;
     say(logging::Level::info,
         std::format("Trainer jump {}: takeoff {:.1f} km/h at {:.1f} deg, air {:.2f} s, height {:.2f} m, distance {:.2f} m, drop {:.2f} m, "
-                    "landing {:.1f} km/h at ({:.1f}, {:.1f}, {:.1f}).",
+                    "landing {:.1f} km/h at ({:.1f}, {:.1f}, {:.1f}); spin {:.0f} deg (peak {:.0f} deg/s), flip {:.0f} deg, "
+                    "states {}>{}.",
                     jump.serial, jump.takeoff_speed * 3.6f, jump.takeoff_angle, jump.air_time, jump.height, jump.distance, jump.drop,
-                    jump.landing_speed * 3.6f, landing[0], landing[1], landing[2]));
+                    jump.landing_speed * 3.6f, landing[0], landing[1], landing[2], jump.spin, jump.spin_rate, jump.flip, m.ground_state,
+                    m.air_state));
 }
 void observe(std::uintptr_t base, std::uintptr_t client, std::uint64_t now) {
     auto &s = state();
@@ -817,6 +836,27 @@ void observe(std::uintptr_t base, std::uintptr_t client, std::uint64_t now) {
     if (t.heading < 0) t.heading += 360.0f;
     t.physics_state = watch.valid ? watch.state : 0;
     if (watch.valid) ++s.states[watch.state];
+    // A hippy jump leaves the board (504) straight from riding (100): measured. A plain
+    // dismount does the same but is not rising, so it is left alone.
+    if (watch.valid && watch.state != s.last_state) {
+        if (watch.state == addr::no_bail::offboard_physics_state && s.last_state == 100 && s.hippy_height != 1.0f) {
+            s.boost_factor = std::sqrt(s.hippy_height); // height goes with the square of the speed
+            s.boost_until = now + 250;
+        }
+        s.last_state = watch.state;
+    }
+    if (s.boost_factor > 0) {
+        const auto result = take_jump_scale_result();
+        if (result.outcome > 0) {
+            say(logging::Level::info, std::format("Trainer: hippy jump boosted: up speed {:.2f} -> {:.2f} m/s.", result.up_speed,
+                                                  result.up_speed * s.boost_factor));
+            s.boost_factor = 0;
+        } else if (now >= s.boost_until || result.outcome == -2) {
+            s.boost_factor = 0;
+        } else if (!multiplayer_session_active() || session_boosts_allowed()) {
+            (void)queue_jump_scale(client, s.entity, s.boost_factor); // again each tick until the skater is rising
+        }
+    }
     const auto seconds = m.valid ? clock_seconds(stamp - m.stamp) : 0.0;
     const Vec3 step{position[0] - m.position[0], position[1] - m.position[1], position[2] - m.position[2]};
     const bool jumped = std::sqrt(step[0] * step[0] + step[1] * step[1] + step[2] * step[2]) > 25.0f;
@@ -836,7 +876,26 @@ void observe(std::uintptr_t base, std::uintptr_t client, std::uint64_t now) {
     // The skater's physics says when it is in the air: its states 200-299 are the pop and
     // the flight (100s ride the ground, 300 is a wipeout, 500s are off the board).
     const bool flying = watch.valid && watch.state >= air_states_first && watch.state < air_states_end;
+    // Rotation in the air: about the vertical (spins) and of the up axis (flips and rolls).
+    const Vec3 forward{matrix[8], matrix[9], matrix[10]}, up{matrix[4], matrix[5], matrix[6]};
+    if (m.airborne && m.axes_valid) {
+        const float yaw = std::atan2(m.forward[2] * forward[0] - m.forward[0] * forward[2], m.forward[0] * forward[0] + m.forward[2] * forward[2]);
+        const float degrees = yaw * 180.0f / std::numbers::pi_v<float>;
+        // A ragdoll or a pose snap turns further in one tick than any trick does: leave those out.
+        if (std::abs(degrees) < 45.0f) {
+            m.spin += degrees;
+            m.spin_rate = std::max(m.spin_rate, std::abs(degrees) / dt);
+        }
+        const float cosine = std::clamp(m.up[0] * up[0] + m.up[1] * up[1] + m.up[2] * up[2], -1.0f, 1.0f);
+        if (const float tumble = std::acos(cosine) * 180.0f / std::numbers::pi_v<float>; tumble < 45.0f) m.flip += tumble;
+    }
+    m.forward = forward;
+    m.up = up;
+    m.axes_valid = true;
+    if (!flying && watch.valid) m.ground_state = watch.state;
     if (flying && !m.airborne) {
+        m.spin = m.spin_rate = m.flip = 0;
+        m.air_state = watch.state;
         m.airborne = true;
         m.takeoff = m.position;
         m.takeoff_velocity = velocity;
@@ -1021,6 +1080,7 @@ void build_view() {
     for (const auto &[name, values] : s.user) next->presets.push_back({name, std::format("{} values", values.size()), false, is_active(name)});
     next->slot = s.slot;
     next->auto_return = s.auto_return;
+    next->hippy_height = s.hippy_height;
     next->return_delay = s.return_delay;
     next->pad_shortcuts = s.pad_shortcuts;
     next->hud = s.hud;
@@ -1204,7 +1264,11 @@ std::string run(std::string_view verb, const std::vector<std::string> &a) {
     if (v == "option") {
         const auto name = lower(arg(0));
         bool on{};
-        if (name == "return_delay") {
+        if (name == "hippy_height") {
+            const auto value = number(arg(1));
+            if (!value) return "error: hippy_height needs a multiplier, 1 = the game's own height.";
+            s.hippy_height = std::clamp(static_cast<float>(*value), 0.25f, 20.0f);
+        } else if (name == "return_delay") {
             const auto value = number(arg(1));
             if (!value) return "error: return_delay needs seconds.";
             s.return_delay = std::clamp(static_cast<float>(*value), 0.0f, 10.0f);
