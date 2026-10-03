@@ -1,6 +1,8 @@
 #include "cas_codec.h"
 
+#ifdef _WIN32
 #include <Windows.h>
+#endif
 #include <algorithm>
 #include <limits>
 #include <mutex>
@@ -46,6 +48,7 @@ private:
 };
 
 // Oodle is the game's own module, so it is resolved once and never unloaded.
+#ifdef _WIN32
 HMODULE oodle(const std::filesystem::path& gameRoot) {
     static std::mutex mutex;
     static HMODULE handle{};
@@ -78,6 +81,17 @@ template <typename Function> Function oodle_function(const std::filesystem::path
     if (!address) throw std::runtime_error(std::string("Oodle export is missing: ") + name);
     return reinterpret_cast<Function>(address);
 }
+#else
+// Linux dedicated servers read pre-exported world-layers.json; Oodle blocks
+// (game CAS) need the Windows game + oo2core DLL and are unsupported here.
+void *oodle(const std::filesystem::path &) {
+    throw std::runtime_error("Oodle CAS data is only supported on Windows (export world-layers.json there)");
+}
+template <typename Function> Function oodle_function(const std::filesystem::path&, const char* name) {
+    (void)name;
+    throw std::runtime_error("Oodle CAS data is only supported on Windows");
+}
+#endif
 
 std::vector<std::byte> zlib_decode(std::span<const std::byte> input, std::size_t size) {
     // miniz is built without its zlib-compatible wrappers, so inflate directly.

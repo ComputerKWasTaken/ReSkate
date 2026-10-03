@@ -155,7 +155,7 @@ std::string stamp(const fs::path& gameRoot) {
     std::ostringstream out;
     out << "1";
     for (const auto& source : maps) {
-        const auto path = gameRoot / L"Data" / fs::path(source.toc);
+        const auto path = gameRoot / "Data" / fs::path(source.toc);
         std::error_code error;
         const auto size = fs::file_size(path, error);
         const auto time = fs::last_write_time(path, error).time_since_epoch().count();
@@ -240,7 +240,7 @@ WorldLayerCatalog load_or_scan(const fs::path& gameRoot, const fs::path& file) {
     auto catalog = scan(gameRoot);
     std::error_code error;
     fs::create_directories(file.parent_path(), error);
-    const auto temporary = fs::path(file).concat(L".tmp");
+    const auto temporary = fs::path(file).concat(".tmp");
     {
         std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
         output << to_json(catalog, current);
@@ -257,5 +257,5 @@ WorldLayerCatalog read(const fs::path& file) {
     return from_json(Json::parse(text.begin(), text.end()));
 }
 
-fs::path cache_file() { return content_cache::directory() / L"world-layers.json"; }
+fs::path cache_file() { return content_cache::directory() / "world-layers.json"; }
 }

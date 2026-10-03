@@ -1,6 +1,7 @@
 // ReSkate dedicated server: a headless session host that players find in the
 // in-game server browser. Runs from its own folder, next to steam_api64.dll and
 // the Steam client files (steamclient64.dll, tier0_s64.dll, vstdlib_s64.dll).
+// On Linux the Steam files are libsteam_api.so and steamclient.so.
 #include "server_config.h"
 #include "server_host.h"
 #include "server_update.h"
@@ -10,8 +11,13 @@
 #include "Engine/Game/World/world_layer_catalog.h"
 #include "Engine/Game/World/world_names.h"
 #include "Engine/Vfs/world_layer_scan.h"
+#ifdef _WIN32
 #include <Windows.h>
 #include <timeapi.h>
+#else
+#include <csignal>
+#include <unistd.h>
+#endif
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -39,13 +45,18 @@ void write_log(const std::string &text) {
     std::lock_guard lock(log_mutex);
     const auto now = std::time(nullptr);
     std::tm local{};
+#ifdef _WIN32
     localtime_s(&local, &now);
+#else
+    localtime_r(&now, &local);
+#endif
     char stamp[32]{};
     std::strftime(stamp, sizeof stamp, "%Y-%m-%d %H:%M:%S", &local);
     std::printf("[%s] %s\n", stamp + 11, text.c_str());
     if (log_file) log_file << '[' << stamp << "] " << text << std::endl;
 }
 std::atomic<bool> finished{};
+#ifdef _WIN32
 BOOL WINAPI on_console(DWORD event) {
     stopping = true;
     // Closing the window ends the process as soon as this returns. Wait (Windows
@@ -55,12 +66,22 @@ BOOL WINAPI on_console(DWORD event) {
         for (int i = 0; i < 90 && !finished; ++i) Sleep(50);
     return TRUE;
 }
+#else
+void on_signal(int) { stopping = true; }
+#endif
 std::filesystem::path folder() {
+#ifdef _WIN32
     std::wstring path(32768, L'\0');
     const auto length = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
     if (!length || length >= path.size()) throw std::runtime_error("Cannot find ReSkateServer.exe");
     path.resize(length);
     return std::filesystem::path(path).parent_path();
+#else
+    char path[4096]{};
+    const auto length = readlink("/proc/self/exe", path, sizeof(path) - 1);
+    if (length <= 0) throw std::runtime_error("Cannot find ReSkateServer");
+    return std::filesystem::path(std::string(path, static_cast<std::size_t>(length))).parent_path();
+#endif
 }
 // Console lines, read on their own thread so the network loop never waits for typing.
 // One reader for the whole process: run() can start again after a failed update.
@@ -88,6 +109,7 @@ Input &console_input() {
 constexpr auto update_interval = std::chrono::minutes(30);
 } // namespace
 
+#ifdef _WIN32
 int run(int argc, wchar_t **argv, bool skip_update) {
     // Unbuffered, so a hosting panel reading the pipe sees each line at once.
     setvbuf(stdout, nullptr, _IONBF, 0);
@@ -115,6 +137,31 @@ int run(int argc, wchar_t **argv, bool skip_update) {
     for (int i = 1; i + 1 < argc; ++i)
         if (std::wstring(argv[i]) == L"--config") config_file = argv[++i];
     if (!log_file.is_open()) log_file.open(here / L"ReSkateServer.log", std::ios::app);
+#else
+int run(int argc, char **argv, bool skip_update) {
+    setvbuf(stdout, nullptr, _IONBF, 0);
+    std::signal(SIGINT, on_signal);
+    std::signal(SIGTERM, on_signal);
+    const auto here = folder();
+    if (argc == 4 && std::string(argv[1]) == "--export-world-layers") {
+        try {
+            const auto catalog = world_layer_scan::scan(std::filesystem::path(argv[2]));
+            if (catalog.layers.empty()) throw std::runtime_error("no world layers found; is that the Skate folder?");
+            std::ofstream out(std::filesystem::path(argv[3]), std::ios::binary | std::ios::trunc);
+            out << world_layer_scan::to_json(catalog, "server");
+            if (!out) throw std::runtime_error("cannot write the file");
+            std::printf("Wrote %zu world layers.\n", catalog.layers.size());
+            return 0;
+        } catch (const std::exception &e) {
+            std::printf("World layer export failed: %s\n", e.what());
+            return 1;
+        }
+    }
+    auto config_file = here / "ReSkateServer.json";
+    for (int i = 1; i + 1 < argc; ++i)
+        if (std::string(argv[i]) == "--config") config_file = argv[++i];
+    if (!log_file.is_open()) log_file.open(here / "ReSkateServer.log", std::ios::app);
+#endif
 
     ServerConfig config;
     try {
@@ -132,7 +179,7 @@ int run(int argc, wchar_t **argv, bool skip_update) {
         return 1;
     }
     // Maps: the retail ones and custom maps from Mods\<mod>\reskate-levels.json.
-    for (const auto &problem : load_levels(here / L"Mods")) write_log("Mods: skipped " + problem);
+    for (const auto &problem : load_levels(here / "Mods")) write_log("Mods: skipped " + problem);
     if (levels().size() > 6) write_log("Mods: " + std::to_string(levels().size() - 6) + " custom map(s).");
     // Older configs name the map by its full destination; keep the plain name instead.
     if (const auto setting = map_setting(config.map); setting != config.map && !setting.empty()) {
@@ -148,7 +195,11 @@ int run(int argc, wchar_t **argv, bool skip_update) {
     remove_previous_update(here);
     bool auto_update = config.auto_update && updates_enabled() && !skip_update;
     for (int i = 1; i < argc; ++i)
+#ifdef _WIN32
         if (std::wstring(argv[i]) == L"--no-update") auto_update = false;
+#else
+        if (std::string(argv[i]) == "--no-update") auto_update = false;
+#endif
     if (auto_update) {
         write_log("Checking for updates...");
         const auto check = check_for_update();
@@ -161,7 +212,7 @@ int run(int argc, wchar_t **argv, bool skip_update) {
                                         : "Update check skipped: " + check.problem + ".");
     }
     // World layers are optional: without the players' catalog every player keeps their own.
-    if (const auto catalog = here / L"world-layers.json"; std::filesystem::exists(catalog)) {
+    if (const auto catalog = here / "world-layers.json"; std::filesystem::exists(catalog)) {
         try {
             install_world_layer_catalog(world_layer_scan::read(catalog));
             write_log("World layers: " + std::to_string(world_layers().size()) + " from world-layers.json.");
@@ -205,7 +256,9 @@ int run(int argc, wchar_t **argv, bool skip_update) {
                               : std::to_string(config.admins.size()) + " admin(s). Type help for commands.");
 
     auto &input = console_input();
+#ifdef _WIN32
     timeBeginPeriod(1);
+#endif
     auto next_advertise = std::chrono::steady_clock::now();
     std::optional<bool> name_allowed; // last seen: whether the name may be listed
     auto next_update_check = next_advertise + update_interval;
@@ -288,7 +341,9 @@ int run(int argc, wchar_t **argv, bool skip_update) {
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
+#ifdef _WIN32
     timeEndPeriod(1);
+#endif
     if (update_check.valid()) update_check.wait();
     write_log(restart ? "Restarting for an update." : "Shutting down.");
     host.stop(restart ? "The server is restarting for an update. Rejoin in a minute." : "The server is shutting down.");
@@ -296,6 +351,7 @@ int run(int argc, wchar_t **argv, bool skip_update) {
     return restart ? restart_for_update : 0;
 }
 
+#ifdef _WIN32
 int wmain(int argc, wchar_t **argv) {
     bool skip_update{};
     int code{};
@@ -322,3 +378,30 @@ int wmain(int argc, wchar_t **argv) {
     finished = true;
     return code;
 }
+#else
+int main(int argc, char **argv) {
+    bool skip_update{};
+    int code{};
+    for (;;) {
+        code = run(argc, argv, skip_update);
+        if (code != restart_for_update) break;
+        try {
+            write_log("Installing server update " + update_version + "...");
+            install_update(folder());
+            write_log("Server update " + update_version + " installed; starting it.");
+            if (relaunch()) {
+                code = 0;
+                break;
+            }
+            write_log("Could not start the updated server; start ReSkateServer again.");
+            code = 1;
+            break;
+        } catch (const std::exception &e) {
+            write_log(std::string("Server update failed (") + e.what() + "); carrying on with this version.");
+            skip_update = true;
+        }
+    }
+    finished = true;
+    return code;
+}
+#endif
