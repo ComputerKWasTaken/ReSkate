@@ -48,12 +48,40 @@ jobs:
       - name: Run portable tests
         run: ctest --test-dir build/linux --output-on-failure
 
+      - name: Fetch Steam libs
+        # Same split as the Windows zip's DLLs: libsteam_api.so from the
+        # Steamworks SDK redist, steamclient.so (+tier0/vstdlib) from the
+        # SteamCMD SDK Redist depot (anonymous). Valve binaries, bundled
+        # like the Windows release bundles its DLLs.
+        run: |
+          set -eux
+          mkdir -p build/steamlibs
+          curl -fSL --retry 3 -o build/steamlibs/libsteam_api.so \
+            "https://raw.githubusercontent.com/rlabrecque/SteamworksSDK/main/redistributable_bin/linux64/libsteam_api.so"
+          test "$(stat -c%s build/steamlibs/libsteam_api.so)" -gt 100000
+          nm -D --defined-only build/steamlibs/libsteam_api.so \
+            | grep "SteamAPI_SteamGameServerNetworkingSockets_SteamAPI_v01" > /dev/null
+          mkdir -p /tmp/steamcmd && cd /tmp/steamcmd
+          curl -fSL --retry 3 -o steamcmd.tar.gz \
+            "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz"
+          tar xzf steamcmd.tar.gz
+          ./steamcmd.sh +@sSteamCmdForcePlatformType linux +login anonymous +app_update 1007 +quit
+          cp linux64/steamclient.so linux64/libtier0_s.so linux64/libvstdlib_s.so \
+            "$GITHUB_WORKSPACE/build/steamlibs/"
+          ls -lh "$GITHUB_WORKSPACE/build/steamlibs/"
+
       - name: Stage package
         run: |
           set -eux
           package='build/package-linux'
           mkdir -p "$package/licenses"
           cp build/linux/ReSkateServer "$package/"
+          cp build/steamlibs/*.so "$package/"
+          cp contrib/setup-linux-server-libs.sh "$package/"
+          cp contrib/reskate-server.service "$package/"
+          cp Server/README-linux.md "$package/"
+          cp Server/README.txt "$package/README-server.txt"
+          cp LICENSE "$package/LICENSE.txt"
           cp contrib/setup-linux-server-libs.sh "$package/"
           cp contrib/reskate-server.service "$package/"
           cp Server/README-linux.md "$package/"

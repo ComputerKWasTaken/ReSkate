@@ -7,8 +7,9 @@ Self-update is disabled on Linux (V1) — update by replacing the binary.
 
 - 64-bit Linux (tested: CachyOS/Arch, Ubuntu 22.04+ should work).
 - `cmake >= 3.24`, `g++ >= 12` (C++20), `libssl-dev` (OpenSSL), `libcurl` headers optional (not needed for V1).
-- Steamworks SDK redist beside the binary: `libsteam_api.so` + `steamclient.so`
-  (Valve proprietary, not in this repo). Anonymous game-server login, same as Windows.
+- Steam shared libs beside the binary: `libsteam_api.so` + `steamclient.so`
+  (Valve proprietary, not in git — but bundled in the CI/release assets,
+  like the Windows zip bundles its DLLs; otherwise fetch them, see below).
 
 ## Where the Steam `.so` files come from
 
