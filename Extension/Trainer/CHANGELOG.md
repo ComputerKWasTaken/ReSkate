@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.1.1 - 2026-10-03
+
+- **Tune no longer offers values that do nothing.** A pass over the game's code found which tuning
+  values it reads (527 of the 930 rows). The rest, including the Mode ollie heights and the hippy
+  jump heights people tried, are hidden unless you tick "Values with no use found", and are marked.
+- The Essentials list now only holds values the game reads: ollie height is the jump-height graph
+  multiplier, body flip and body spin speed are the ones the quick switches use.
+- Every preset can be switched off again by itself; presets that are still on keep their values.
+- Presets no longer contain rules for values the game does not read. Mega Pop and No Speed Wobble
+  were rebuilt on the ones it does.
+- The Tune tab says that changes apply as you drag and that the box only locks a value.
+
 ## v0.1.0 - 2026-10-03
 
 First release, built on ReSkate 1.0.3.

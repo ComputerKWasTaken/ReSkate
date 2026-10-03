@@ -42,6 +42,7 @@ struct Entry {
     double value{}, stock{};
     bool touched{}, frozen{};
     bool detail{};
+    bool used{}; // the game's code was found to read it (trainer_used.inc)
     std::vector<std::size_t> members; // graph: its outputs (Y0.., Min_Y, Max_Y)
 };
 struct MapData {
@@ -404,6 +405,7 @@ void build_entries() {
         e.offset = offset;
         e.size = size;
         e.curve = curve;
+        e.used = value_used(offset);
         s.index.emplace(e.key, s.entries.size());
         s.entries.push_back(std::move(e));
     };
@@ -566,6 +568,9 @@ std::string remove_preset(std::string_view name) {
         }
     if (removed.empty()) return "error: no preset is called \"" + std::string(name) + "\".";
     std::erase(s.active, removed);
+    // Presets that are still on may share values with the one switched off: set theirs again.
+    const auto still_on = s.active;
+    for (const auto &other : still_on) (void)apply_preset(other);
     changed();
     return std::format("{} off: {} values put back.", removed, count);
 }
@@ -960,7 +965,8 @@ void build_view() {
     for (const auto &e : s.entries) {
         int rank{};
         const auto friendly = essential_name(e.key, &rank);
-        next->rows.push_back({e.id, e.label, e.group, e.kind, e.value, e.stock, e.touched, e.frozen, e.detail, std::string(friendly), rank});
+        next->rows.push_back({e.id, e.label, e.group, e.kind, e.value, e.stock, e.touched, e.frozen, e.detail, std::string(friendly), rank,
+                              e.used});
         if (e.touched) ++next->touched;
         if (std::ranges::find(next->groups, e.group) == next->groups.end()) next->groups.push_back(e.group);
     }

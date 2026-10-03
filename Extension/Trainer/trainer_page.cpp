@@ -17,7 +17,8 @@ struct Page {
     int tab{1}; // opens on PRESETS: the quick switches
     std::array<char, 96> search{};
     int group{}; // 0: the Essentials list, 1: every group, 2..: one of the view's groups
-    bool only_changed{}, graph_points{};
+    bool only_changed{}, graph_points{}, show_unused{};
+    std::size_t hidden_unused{}; // rows the filters would show but for "no use found"
     // The rows the filters leave, rebuilt when the snapshot or a filter changes.
     std::vector<std::size_t> shown;
     std::uint64_t shown_revision{};
@@ -57,11 +58,12 @@ void trainer_command(SkateMenu &menu, const CallbacksV3 &callbacks, const std::s
 
 void filter_rows(Page &p, const trainer::View &view) {
     const auto words = lower(p.search.data());
-    const auto key = std::format("{}|{}|{}|{}", words, p.group, p.only_changed, p.graph_points);
+    const auto key = std::format("{}|{}|{}|{}|{}", words, p.group, p.only_changed, p.graph_points, p.show_unused);
     if (p.shown_revision == view.revision && p.shown_key == key) return;
     p.shown_revision = view.revision;
     p.shown_key = key;
     p.shown.clear();
+    p.hidden_unused = 0;
     const std::string *group = p.group > 1 && static_cast<std::size_t>(p.group) <= view.groups.size() + 1
         ? &view.groups[static_cast<std::size_t>(p.group) - 2] : nullptr;
     const bool essentials = p.group == 0 && words.empty() && !p.only_changed;
@@ -76,6 +78,11 @@ void filter_rows(Page &p, const trainer::View &view) {
         // Searching looks through every group.
         if (words.empty() ? (group && row.group != *group) : !contains_words(lower(row.id + " " + row.label + " " + row.friendly), words))
             continue;
+        // A value nothing in the game reads would be a slider that does nothing.
+        if (!row.used && !p.show_unused && !row.touched && !row.frozen) {
+            ++p.hidden_unused;
+            continue;
+        }
         p.shown.push_back(i);
     }
     if (essentials) std::ranges::sort(p.shown, {}, [&](std::size_t i) { return view.rows[i].rank; });
@@ -86,15 +93,18 @@ void value_row(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const tra
     ImGui::PushID(row.id.c_str());
     bool frozen = row.frozen;
     if (ImGui::Checkbox("##freeze", &frozen)) trainer_command(menu, callbacks, std::format("freeze {} {}", row.id, frozen ? 1 : 0));
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Freeze: presets and Reset all leave this value alone.");
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Lock: presets and Reset all leave this value alone.\nYou do not need it for a change to apply.");
     ImGui::SameLine();
     const float column = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x * 0.52f;
     const auto label = friendly && !row.friendly.empty() ? row.friendly : with_group ? row.group + " / " + row.label : row.label;
-    if (row.touched) ImGui::PushStyleColor(ImGuiCol_Text, skate_theme::blue);
+    const bool tinted = row.touched || !row.used;
+    if (tinted) ImGui::PushStyleColor(ImGuiCol_Text, row.used ? skate_theme::blue : IM_COL32(150, 150, 150, 255));
     ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(label.c_str());
-    if (row.touched) ImGui::PopStyleColor();
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s\nStock: %s", row.id.c_str(), number(row.stock).c_str());
+    ImGui::TextUnformatted(row.used ? label.c_str() : (label + "  (no use found)").c_str());
+    if (tinted) ImGui::PopStyleColor();
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s\nStock: %s%s", row.id.c_str(), number(row.stock).c_str(),
+            row.used ? "" : "\nNo game code was found reading this value, so changing it will probably do nothing.");
     ImGui::SameLine(column);
     const float reset = ImGui::CalcTextSize("Reset").x + ImGui::GetStyle().FramePadding.x * 2;
     ImGui::BeginDisabled(!view.editable || !callbacks.queue_console_command);
@@ -157,13 +167,19 @@ void tune_tab(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const trai
     ImGui::BeginDisabled(!view.touched || !view.editable);
     if (ImGui::Button("Reset all")) trainer_command(menu, callbacks, "reset all");
     ImGui::EndDisabled();
+    note("Changes apply as you drag. The box on the left only locks a value against presets and Reset all.");
     ImGui::Checkbox("Only what I changed", &p.only_changed);
     ImGui::SameLine();
     ImGui::Checkbox("Graph points", &p.graph_points);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Show every point of the tuning graphs, not just one multiplier per graph.");
+    ImGui::SameLine();
+    ImGui::Checkbox("Values with no use found", &p.show_unused);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Also list the tuning values that no game code was found reading.\nChanging those will probably do nothing.");
     filter_rows(p, view);
     ImGui::SameLine();
-    ImGui::TextDisabled("%zu shown, %zu changed", p.shown.size(), view.touched);
+    if (p.hidden_unused) ImGui::TextDisabled("%zu shown, %zu changed, %zu hidden", p.shown.size(), view.touched, p.hidden_unused);
+    else ImGui::TextDisabled("%zu shown, %zu changed", p.shown.size(), view.touched);
     const bool with_group = p.search[0] != 0 || p.group <= 1 || p.only_changed;
     const bool friendly = p.group == 0 && p.search[0] == 0 && !p.only_changed;
     ImGui::BeginChild("tune-rows", ImVec2(0, 0), ImGuiChildFlags_None);
@@ -201,16 +217,25 @@ void presets_tab(SkateMenu &menu, const Model &model, const CallbacksV3 &callbac
             debug_request(menu, callbacks, {DebugAction::set_no_bail, no_bail});
     }
     end_card();
-    begin_card(menu, "presets", "PRESETS", "They stack; Stock clears them");
+    begin_card(menu, "presets", "PRESETS", "Switch any of them on and off; they stack");
     ImGui::BeginDisabled(!view.ready || !view.editable);
-    const float apply = ImGui::CalcTextSize("Apply").x + ImGui::GetStyle().FramePadding.x * 2;
+    const float button = ImGui::CalcTextSize("Turn off").x + ImGui::GetStyle().FramePadding.x * 2;
     for (const auto &preset : view.presets) {
         ImGui::PushID(preset.name.c_str());
-        if (ImGui::Button("Apply", ImVec2(apply, 0))) trainer_command(menu, callbacks, "preset apply " + preset.name);
+        if (preset.name == "Stock") {
+            // Not a preset to switch: everything back to how the map loaded.
+            if (ImGui::Button("Reset", ImVec2(button, 0))) trainer_command(menu, callbacks, "preset apply Stock");
+        } else if (preset.active) {
+            ImGui::PushStyleColor(ImGuiCol_Button, skate_theme::blue);
+            if (ImGui::Button("Turn off", ImVec2(button, 0))) trainer_command(menu, callbacks, "preset remove " + preset.name);
+            ImGui::PopStyleColor();
+        } else if (ImGui::Button("Turn on", ImVec2(button, 0))) {
+            trainer_command(menu, callbacks, "preset apply " + preset.name);
+        }
         ImGui::SameLine();
         ImGui::AlignTextToFramePadding();
         ImGui::TextUnformatted(preset.name.c_str());
-        if (preset.active) {
+        if (preset.active && preset.name != "Stock") {
             ImGui::SameLine();
             tag(menu, "ON", skate_theme::blue);
         }

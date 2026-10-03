@@ -26,6 +26,7 @@ struct Row {
     bool detail{}; // a single point or bound of a graph: hidden unless asked for
     std::string friendly; // a plain name, for the handful of values on the Essentials list
     int rank{};           // its place on that list, from 1; 0: not on it
+    bool used{};          // the game's code was found to read it
 };
 struct PresetRow {
     std::string name, note;

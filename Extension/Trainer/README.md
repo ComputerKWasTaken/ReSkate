@@ -8,8 +8,8 @@ telemetry HUD. It ships no game data: the list of values is built at run time fr
 
 | Tab | What you get |
 |---|---|
-| **TUNE** | An Essentials list of 26 plainly named values (ollie height, top speed, flip and spin speed, grind lock-on, bail limits...), then every plain value of the game's physics tuning (about 760), plus one multiplier for each of its 169 curves and graphs. Search, filter by group, "only what I changed", freeze, reset. Changes apply while you skate. |
-| **PRESETS** | Quick switches for super high ollie, fast flips, fast spins and never bail. Built-in presets that stack (Super Ollie, Fast Flips, Fast Spins, Mega Pop, Fast, Hard To Bail, Sticky Grinds, ...), your own saved presets, and a preset a map applies every time it loads. |
+| **TUNE** | An Essentials list of 22 plainly named values (ollie height, top speed, body flip and spin speed, grind lock-on...), then every plain value of the game's physics tuning (about 760), plus one multiplier for each of its 169 curves and graphs. Search, filter by group, "only what I changed", lock, reset. Changes apply while you skate. Values that no game code was found reading are hidden unless you ask for them. |
+| **PRESETS** | Quick switches for super high ollie, fast flips, fast spins and never bail. Built-in presets you switch on and off, and that stack (Super Ollie, Fast Flips, Fast Spins, Mega Pop, Fast, Hard To Bail, Sticky Grinds, ...), your own saved presets, and a preset a map applies every time it loads. |
 | **PRACTICE** | Game speed and pause, five marker slots per map (save / go / clear), return to the marker after a bail, teleport to coordinates, copy your position (game or Blender axes). |
 | **MAP & HUD** | Speed and air-time HUD, a read-out after every jump (takeoff speed and angle, height, distance, drop, landing speed), telemetry recording to CSV, and whatever the map's author ships for the trainer. |
 
@@ -83,9 +83,10 @@ folder>` (CMake option `DINGOSDK_BUILD_TRAINER_TESTS`) lists the tuning values w
 - Masses and collision sizes (deck, trucks, wheels) only change on the next respawn.
 - Curve and graph multipliers scale outputs only; a curve whose point count a mod changed keeps the
   mod's points.
-- Not every tuning value is used by the game. The quick switches were built from what the game was
-  seen to read during tricks: ollie height comes from the `PhysicsJump` height graphs (the
-  `PhysicsMode` jump heights are never read), body flips from `PhysicsReckoning.FlipScalar` and
-  `FlipMaxSpeed` (`PerfectBodyFlips` forces exactly one rotation and ignores them), body spins from
-  the `PhysicsBodyspin` graphs.
+- Not every tuning value is used by the game: about 4 in 10 rows have no code reading them
+  (`trainer_used.inc`, found by a static pass over the game's code for this build). Ollie height
+  comes from the `PhysicsJump` height graphs (the `PhysicsMode` jump heights are never read), body
+  flips from `PhysicsReckoning.FlipScalar` and `FlipMaxSpeed` (`PerfectBodyFlips` forces exactly one
+  rotation and ignores them), body spins from the `PhysicsBodyspin` graphs. "No use found" is not
+  proof: the pass can miss a use.
 - Built for one game build (the one ReSkate 1.0.3 supports). A game update needs a new build.

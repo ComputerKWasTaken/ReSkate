@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <string_view>
 #include <vector>
 
@@ -18,6 +19,9 @@ struct BuiltinPreset {
 };
 // The plain name of a value on the Essentials list, by its lower-case id; empty for the rest.
 std::string_view essential_name(std::string_view key, int *rank = nullptr);
+// Whether the game's code was found to read the tuning value at this offset of the asset.
+// False means "no use found": changing it will probably do nothing.
+bool value_used(std::uint16_t offset);
 // Presets stack: each applies on top of what is already changed; Stock clears them.
 const std::vector<BuiltinPreset> &builtin_presets();
 } // namespace dingosdk::trainer
