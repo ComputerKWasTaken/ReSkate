@@ -42,7 +42,8 @@ struct Entry {
     double value{}, stock{};
     bool touched{}, frozen{};
     bool detail{};
-    bool used{}; // the game's code was found to read it (trainer_used.inc)
+    bool used{}; // the game's code was found to read it (trainer_used.inc), or it is linked
+    std::vector<std::size_t> drives; // graph multipliers this value scales (value_links)
     std::vector<std::size_t> members; // graph: its outputs (Y0.., Min_Y, Max_Y)
 };
 struct MapData {
@@ -371,6 +372,14 @@ void set_entry(Entry &e, double value) {
     e.touched = e.value != e.stock;
     apply_entry(e);
     remember(e);
+    // A linked value scales its graphs by the same ratio (the graphs are what the game reads).
+    if (!e.drives.empty() && e.stock != 0) {
+        const auto ratio = e.value / e.stock;
+        const auto targets = e.drives; // set_entry may not touch `e` again, but keep the list stable
+        auto &s = state();
+        for (const auto index : targets)
+            if (index < s.entries.size() && !s.entries[index].frozen) set_entry(s.entries[index], ratio);
+    }
 }
 Entry *find_entry(std::string_view id) {
     auto &s = state();
@@ -436,6 +445,12 @@ void build_entries() {
         add(parent, Kind::graph, offset, 0, 0);
         s.entries.back().members = std::move(outputs);
     }
+    for (const auto &link : value_links()) {
+        const auto from = s.index.find(link.value), to = s.index.find(link.drives);
+        if (from == s.index.end() || to == s.index.end()) continue;
+        s.entries[from->second].drives.push_back(to->second);
+        s.entries[from->second].used = true;
+    }
     say(logging::Level::info, std::format("Trainer: {} tuning values and {} curves are editable.", m.fields.size(), m.curve_slots.size()));
 }
 // A new copy of the asset (first sight, or a level load): its values are the stock ones.
@@ -454,6 +469,21 @@ void adopt(const tuning::Values &live) {
             e.value = e.stock;
         }
         if (e.touched) apply_entry(e);
+    }
+    // A linked value saved by itself (before links existed, or edited in the file) still
+    // drives its graphs.
+    for (auto &e : s.entries) {
+        if (e.drives.empty() || !e.touched || e.stock == 0) continue;
+        for (const auto index : e.drives) {
+            auto &target = s.entries[index];
+            if (target.touched || target.frozen) continue;
+            target.value = sane(target, e.value / e.stock);
+            target.touched = target.value != target.stock;
+            if (target.touched) {
+                apply_entry(target);
+                remember(target);
+            }
+        }
     }
     s.write_due = true;
     changed(false);
@@ -543,9 +573,18 @@ std::string remove_preset(std::string_view name) {
     std::size_t count{};
     std::string removed;
     const auto put_back = [&](Entry &e) {
-        if (e.frozen || !e.touched) return;
-        set_entry(e, e.stock);
-        ++count;
+        if (e.frozen) return;
+        if (e.touched) {
+            set_entry(e, e.stock);
+            ++count;
+            return;
+        }
+        // A linked value at stock whose graphs were set directly (by an older version's preset).
+        for (const auto index : e.drives)
+            if (auto &target = s.entries[index]; target.touched && !target.frozen) {
+                set_entry(target, target.stock);
+                ++count;
+            }
     };
     for (const auto &[user_name, values] : s.user) {
         if (lower(user_name) != wanted) continue;
@@ -593,7 +632,7 @@ std::string apply_preset(std::string_view name) {
         changed();
         return std::format("Stock: {} values put back (frozen values kept).", count);
     }
-    std::size_t count{};
+    std::size_t count{}, locked{};
     std::string applied;
     if (wanted == "map") {
         if (s.map_file.preset.empty()) return "error: this map ships no trainer preset.";
@@ -615,8 +654,12 @@ std::string apply_preset(std::string_view name) {
             for (const auto &rule : preset.rules)
                 for (auto &e : s.entries) {
                     const bool scale = e.kind == Kind::curve || e.kind == Kind::graph;
-                    if (e.frozen || e.detail || scale != rule.curves || !matches(e.key, rule.pattern)) continue;
+                    if (e.detail || scale != rule.curves || !matches(e.key, rule.pattern)) continue;
                     if (e.kind == Kind::flag && rule.multiply) continue;
+                    if (e.frozen) {
+                        ++locked;
+                        continue;
+                    }
                     set_entry(e, rule.multiply ? e.stock * rule.amount : rule.amount);
                     ++count;
                 }
@@ -626,7 +669,8 @@ std::string apply_preset(std::string_view name) {
     if (applied.empty()) return "error: no preset is called \"" + std::string(name) + "\".";
     if (std::ranges::find(s.active, applied) == s.active.end()) s.active.push_back(applied);
     changed();
-    return std::format("{}: {} values set.", applied, count);
+    return std::format("{}: {} values set{}.", applied, count,
+                       locked ? std::format("; {} locked values left alone (untick their boxes in Tune to let presets change them)", locked) : "");
 }
 
 // ---- maps ------------------------------------------------------------------------------

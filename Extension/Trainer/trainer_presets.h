@@ -22,6 +22,13 @@ std::string_view essential_name(std::string_view key, int *rank = nullptr);
 // Whether the game's code was found to read the tuning value at this offset of the asset.
 // False means "no use found": changing it will probably do nothing.
 bool value_used(std::uint16_t offset);
+// Values the game does not read itself but that the trainer makes work: changing one scales
+// the graphs that really control the behaviour by the same ratio (value / stock).
+struct Link {
+    std::string_view value;  // lower-case id of the value the player edits
+    std::string_view drives; // lower-case id of a graph multiplier it scales
+};
+const std::vector<Link> &value_links();
 // Presets stack: each applies on top of what is already changed; Stock clears them.
 const std::vector<BuiltinPreset> &builtin_presets();
 } // namespace dingosdk::trainer

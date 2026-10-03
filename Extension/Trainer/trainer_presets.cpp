@@ -12,24 +12,36 @@ bool value_used(std::uint16_t offset) {
     };
     return std::binary_search(std::begin(used), std::end(used), offset);
 }
-// Only values the game was found to read: a slider that does nothing is worse than none.
+// The game ignores these named values; the graphs on the right are what it reads. Linking them
+// lets "ollie height" and "spin speed" be plain numbers instead of graph multipliers.
+const std::vector<Link> &value_links() {
+    static const std::vector<Link> links{
+        {"physicsmode.jumpmaxheight", "physicsjump.maxheightvsspeed x"},
+        {"physicsmode.jumpminheight", "physicsjump.minheightvsspeed x"},
+        {"physicsairstates.maxspinspeed", "physicsbodyspin.propbodyspinvstime x"},
+        {"physicsairstates.maxspinspeed", "physicsbodyspin.pbsvst_easy x"},
+        {"physicsairstates.maxspinspeed", "physicsbodyspin.maxdeltavstime x"},
+        {"physicsairstates.maxspinspeed", "physicsbodyspin.maxdeltavstimeeasy x"},
+    };
+    return links;
+}
+// Only values that do something: read by the game, or linked above.
 std::string_view essential_name(std::string_view key, int *rank) {
-    static constexpr std::array<std::pair<std::string_view, std::string_view>, 22> names{{
-        {"physicsjump.maxheightvsspeed x", "Ollie height (x)"},
-        {"physicsjump.minheightvsspeed x", "Ollie height, light pop (x)"},
+    static constexpr std::array<std::pair<std::string_view, std::string_view>, 21> names{{
+        {"physicsmode.jumpmaxheight", "Ollie height (max)"},
+        {"physicsmode.jumpminheight", "Ollie height (min, light pop)"},
         {"physicsmode.grindjumpcommonmax", "Pop out of grinds (max)"},
         {"physicsjump.jumpybonusmax", "Jump bonus (max)"},
+        {"physicsreckoning.flipscalar", "Body flip speed"},
+        {"physicsreckoning.flipmaxspeed", "Body flip speed limit"},
+        {"physicsmode.perfectbodyflips", "Perfect body flips (exactly one rotation)"},
+        {"physicsairstates.maxspinspeed", "Body spin speed"},
+        {"physicsmode.maxautobodyspinspeed", "Auto body spin speed"},
+        {"physicsmode.easybodyspins", "Easy body spins"},
         {"physicspush.maxpushablespeed", "Top pushing speed (m/s)"},
         {"physicsmode.maxpushdvstart", "Push strength"},
         {"physicsmode.autopushenabled", "Auto push"},
         {"physicsmode.speedwobblestartspeed", "Speed wobble starts at (m/s)"},
-        {"physicsreckoning.flipscalar", "Body flip speed"},
-        {"physicsreckoning.flipmaxspeed", "Body flip speed limit"},
-        {"physicsmode.perfectbodyflips", "Perfect body flips (exactly one rotation)"},
-        {"physicsbodyspin.propbodyspinvstime x", "Body spin speed (x)"},
-        {"physicsbodyspin.maxdeltavstime x", "Body spin acceleration (x)"},
-        {"physicsmode.maxautobodyspinspeed", "Auto body spin speed"},
-        {"physicsmode.easybodyspins", "Easy body spins"},
         {"physicsmode.grindlockdist", "Grind lock-on distance"},
         {"physicsgrind.commonfrictionscalar", "Grind friction"},
         {"physicsmode.makesurfacessmooth", "Smooth surfaces"},
@@ -48,22 +60,21 @@ std::string_view essential_name(std::string_view key, int *rank) {
 // whatever build is running and simply skips the ones that build lacks.
 const std::vector<BuiltinPreset> &builtin_presets() {
     static const std::vector<BuiltinPreset> presets{
-        // Rules name values the game was found to read (trainer_used.inc). Jump height comes
-        // from the PhysicsJump height graphs (the Mode jump heights are never read); body flips
+        // Rules name values the game was found to read (trainer_used.inc) or linked values
+        // (value_links). Jump height comes from the PhysicsJump height graphs; body flips
         // from FlipScalar and FlipMaxSpeed unless PerfectBodyFlips forces exactly one rotation;
         // body spins from the PhysicsBodyspin graphs and MaxAutoBodySpinSpeed.
         {"Super Ollie", "Huge ollies: about three times the height at any speed.",
-         {{"physicsjump.maxheightvsspeed", true, 3.0, true}, {"physicsjump.minheightvsspeed", true, 3.0, true},
+         {{"physicsmode.jumpmaxheight", true, 3.0}, {"physicsmode.jumpminheight", true, 3.0},
           {"physicsjump.absoluteminheight", true, 2.0}, {"physicsjump.jumpybonusmax", true, 3.0},
           {"physicsmode.grindjump", true, 2.5}}},
         {"Fast Flips", "Front flips and back flips rotate three times as fast.",
          {{"physicsreckoning.flipscalar", true, 3.0}, {"physicsreckoning.flipmaxspeed", true, 3.0},
           {"physicsmode.perfectbodyflips", false, 0.0}}},
         {"Fast Spins", "Body spins rotate three times as fast.",
-         {{"physicsbodyspin.propbodyspinvstime", true, 3.0, true}, {"physicsbodyspin.pbsvst_easy", true, 3.0, true},
-          {"physicsbodyspin.maxdeltavstime", true, 3.0, true}, {"physicsmode.maxautobodyspinspeed", true, 3.0}}},
+         {{"physicsairstates.maxspinspeed", true, 3.0}, {"physicsmode.maxautobodyspinspeed", true, 3.0}}},
         {"Mega Pop", "Ollies and grind pops go about twice as high.",
-         {{"physicsjump.maxheightvsspeed", true, 2.0, true}, {"physicsjump.minheightvsspeed", true, 1.6, true},
+         {{"physicsmode.jumpmaxheight", true, 2.0}, {"physicsmode.jumpminheight", true, 1.6},
           {"physicsjump.jumpybonusmax", true, 2.0}, {"physicsmode.grindjump", true, 1.6}}},
         {"Fast", "Push to a higher top speed and get there sooner.",
          {{"physicspush.maxpushablespeed !camera", true, 1.8}, {"physicspush.maxspeedforautopush", true, 1.8},

@@ -5,8 +5,12 @@
 - **Tune no longer offers values that do nothing.** A pass over the game's code found which tuning
   values it reads (527 of the 930 rows). The rest, including the Mode ollie heights and the hippy
   jump heights people tried, are hidden unless you tick "Values with no use found", and are marked.
-- The Essentials list now only holds values the game reads: ollie height is the jump-height graph
-  multiplier, body flip and body spin speed are the ones the quick switches use.
+- **Ollie height and body spin speed are plain values again.** The game ignores its own
+  `JumpMaxHeight`, `JumpMinHeight` and `MaxSpinSpeed`; the trainer now links them to the graphs the
+  game does read, so setting ollie height to twice its stock value doubles the jump graphs.
+- The Essentials list only holds values that do something: ollie height, body flip speed, body
+  spin speed, pushing speed, grind lock-on and more.
+- A preset says when it skipped values you locked.
 - Every preset can be switched off again by itself; presets that are still on keep their values.
 - Presets no longer contain rules for values the game does not read. Mega Pop and No Speed Wobble
   were rebuilt on the ones it does.
