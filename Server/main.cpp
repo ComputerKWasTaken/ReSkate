@@ -18,6 +18,7 @@
 #include <cerrno>
 #include <csignal>
 #include <poll.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 #include <atomic>
@@ -104,6 +105,13 @@ struct Input {
     // stream locks, so process exit can never deadlock against it, and poll()
     // wakes regularly so stopping is noticed without closing stdin.
     void run() {
+        // Control pipes (fleet tools, `echo cmd > fifo`) open a writer per
+        // command: read() returning 0 then means "no writers right now", not
+        // end of input, so keep waiting instead of ending console input.
+        const bool fifo = [] {
+            struct stat info{};
+            return fstat(STDIN_FILENO, &info) == 0 && S_ISFIFO(info.st_mode);
+        }();
         std::string pending;
         pending.reserve(256);
         for (;;) {
@@ -118,7 +126,16 @@ struct Input {
             if (!(waiting.revents & (POLLIN | POLLHUP))) return;
             char buffer[4096];
             const ssize_t count = read(STDIN_FILENO, buffer, sizeof(buffer));
-            if (count <= 0) return; // EOF or error: console input is over
+            if (count < 0) {
+                if (errno == EINTR || errno == EAGAIN) continue;
+                return;
+            }
+            if (count == 0) {
+                if (!fifo) return; // EOF on files, /dev/null, terminals: input is over
+                // No writers at the moment; sleep so POLLHUP doesn't spin.
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                continue;
+            }
             for (ssize_t i = 0; i < count; ++i) {
                 if (buffer[i] == '\n') {
                     std::lock_guard lock(mutex);
