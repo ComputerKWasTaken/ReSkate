@@ -15,7 +15,9 @@
 #include <Windows.h>
 #include <timeapi.h>
 #else
+#include <cerrno>
 #include <csignal>
+#include <poll.h>
 #include <unistd.h>
 #endif
 #include <atomic>
@@ -88,6 +90,7 @@ std::filesystem::path folder() {
 struct Input {
     std::mutex mutex;
     std::deque<std::string> lines;
+#ifdef _WIN32
     void run() {
         std::string line;
         while (!stopping && std::getline(std::cin, line)) {
@@ -95,6 +98,46 @@ struct Input {
             lines.push_back(line);
         }
     }
+#else
+    std::thread worker;
+    // Raw poll()+read() on stdin instead of iostream: the thread holds no C++
+    // stream locks, so process exit can never deadlock against it, and poll()
+    // wakes regularly so stopping is noticed without closing stdin.
+    void run() {
+        std::string pending;
+        pending.reserve(256);
+        for (;;) {
+            if (stopping) return;
+            pollfd waiting{STDIN_FILENO, POLLIN, 0};
+            const int ready = poll(&waiting, 1, 200);
+            if (ready < 0) {
+                if (errno == EINTR) continue;
+                return;
+            }
+            if (!ready) continue; // timeout: re-check stopping
+            if (!(waiting.revents & (POLLIN | POLLHUP))) return;
+            char buffer[4096];
+            const ssize_t count = read(STDIN_FILENO, buffer, sizeof(buffer));
+            if (count <= 0) return; // EOF or error: console input is over
+            for (ssize_t i = 0; i < count; ++i) {
+                if (buffer[i] == '\n') {
+                    std::lock_guard lock(mutex);
+                    lines.push_back(pending);
+                    pending.clear();
+                } else {
+                    pending.push_back(buffer[i]);
+                }
+            }
+        }
+    }
+    void shutdown() {
+        if (worker.joinable()) worker.join();
+    }
+    void ensure_running() {
+        std::lock_guard lock(mutex);
+        if (!worker.joinable()) worker = std::thread([this] { run(); });
+    }
+#endif
     std::deque<std::string> take() {
         std::lock_guard lock(mutex);
         return std::exchange(lines, {});
@@ -102,8 +145,12 @@ struct Input {
 };
 Input &console_input() {
     static Input input;
+#ifdef _WIN32
     static std::once_flag started;
     std::call_once(started, [] { std::thread([] { input.run(); }).detach(); });
+#else
+    input.ensure_running();
+#endif
     return input;
 }
 constexpr auto update_interval = std::chrono::minutes(30);
@@ -343,6 +390,10 @@ int run(int argc, char **argv, bool skip_update) {
     }
 #ifdef _WIN32
     timeEndPeriod(1);
+#else
+    // Join the console reader before touching Steam shutdown and process exit:
+    // it holds no stream locks, and poll() notices stopping within ~200 ms.
+    input.shutdown();
 #endif
     if (update_check.valid()) update_check.wait();
     write_log(restart ? "Restarting for an update." : "Shutting down.");

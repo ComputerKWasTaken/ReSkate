@@ -70,10 +70,12 @@ Expected: 8 passed (`multiplayer_parties`, `server_activity`, `server_speed_chec
 
 ## Run
 
-1. Put `ReSkateServer` in its own folder, then fetch the Steam libs (or do it by hand, see below):
+1. Put `ReSkateServer` in its own folder, then fetch the Steam libs
+   (shipped as `setup-linux-server-libs.sh` beside the binary):
    ```sh
-   ./contrib/setup-linux-server-libs.sh --server-dir "/path/to/server"
+   ./setup-linux-server-libs.sh    # uses the folder it sits in; or --server-dir DIR
    ```
+   Or do it by hand, see below.
 2. First run writes `ReSkateServer.json`; edit `name` + `admins`, restart.
 3. Optional: `world-layers.json` for time-of-day / world layers.
    Normal server runs only *read* this file (`world_layer_scan::read`, JSON only)

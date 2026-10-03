@@ -3,9 +3,15 @@ name: Linux Server
 on:
   push:
     branches: [linux-server-native, main]
+    tags: ['v*']
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      version:
+        description: Version stamped into the binaries and the asset name (e.g. 1.0.3)
+        required: true
+        default: 0.0.0-dev
 
 permissions:
   contents: read
@@ -27,8 +33,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential cmake libssl-dev
 
+      - name: Set version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then echo "VERSION=${{ inputs.version }}" >> "$GITHUB_ENV"
+          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_ENV"
+          else echo "VERSION=0.0.0-dev" >> "$GITHUB_ENV"; fi
+
       - name: Configure
-        run: cmake --preset linux-x64 -DDINGOSDK_BUILD_MULTIPLAYER_TESTS=ON
+        run: cmake --preset linux-x64 -DDINGOSDK_BUILD_MULTIPLAYER_TESTS=ON "-DDINGOSDK_VERSION=${{ env.VERSION }}"
 
       - name: Build server and tests
         run: cmake --build --preset linux-release --parallel 4
@@ -42,9 +54,10 @@ jobs:
           package='build/package-linux'
           mkdir -p "$package/licenses"
           cp build/linux/ReSkateServer "$package/"
+          cp contrib/setup-linux-server-libs.sh "$package/"
+          cp contrib/reskate-server.service "$package/"
           cp Server/README-linux.md "$package/"
           cp Server/README.txt "$package/README-server.txt"
-          cp contrib/reskate-server.service "$package/"
           cp LICENSE "$package/LICENSE.txt"
           for library in rapidjson sqlite miniz bcdec; do
             cp "External/$library/LICENSE.txt" "$package/licenses/$library-LICENSE.txt"
@@ -58,7 +71,7 @@ jobs:
       - name: Upload Linux server
         uses: actions/upload-artifact@v7
         with:
-          name: ReSkateServer-linux-x64-${{ github.sha }}
+          name: ReSkateServer-Linux-${{ env.VERSION }}
           path: build/package-linux/
           archive: true
           if-no-files-found: error
