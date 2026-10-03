@@ -343,7 +343,17 @@ bool SteamTransport::open() {
         } catch (...) {
             p.friends = nullptr;
         }
-        return bind(module, symbol<void *(*)()>(module, "SteamAPI_SteamNetworkingSockets_SteamAPI_v012")(),
+        void *sockets = nullptr;
+        for (const char *name : {"SteamAPI_SteamNetworkingSockets_SteamAPI_v013",
+                                 "SteamAPI_SteamNetworkingSockets_SteamAPI_v012"}) {
+            try {
+                sockets = symbol<void *(*)()>(module, name)();
+                break;
+            } catch (...) {
+            }
+        }
+        if (!sockets) throw std::runtime_error("Missing Steam export: SteamAPI_SteamNetworkingSockets_SteamAPI");
+        return bind(module, sockets,
                     symbol<void *(*)()>(module, "SteamAPI_SteamNetworkingUtils_SteamAPI_v004")());
     } catch (const std::exception &e) {
         p.state.detail = e.what();
@@ -367,8 +377,19 @@ bool SteamTransport::open_game_server(void *library) {
         const auto find = symbol<void *(*)(int, const char *)>(module, "SteamInternal_FindOrCreateGameServerInterface");
         // Game servers have no friends list; names come from each player's hello.
         p.friends = nullptr;
-        return bind(module, symbol<void *(*)()>(module, "SteamAPI_SteamGameServerNetworkingSockets_SteamAPI_v012")(),
-                    find(user, "SteamNetworkingUtils004"));
+        // Sockets v012 (Skate's Windows DLL) vs v013 (current SDK): same methods
+        // used here, v013 is a superset. Try new first, fall back to old.
+        void *sockets = nullptr;
+        for (const char *name : {"SteamAPI_SteamGameServerNetworkingSockets_SteamAPI_v013",
+                                 "SteamAPI_SteamGameServerNetworkingSockets_SteamAPI_v012"}) {
+            try {
+                sockets = symbol<void *(*)()>(module, name)();
+                break;
+            } catch (...) {
+            }
+        }
+        if (!sockets) throw std::runtime_error("Missing Steam export: SteamAPI_SteamGameServerNetworkingSockets_SteamAPI");
+        return bind(module, sockets, find(user, "SteamNetworkingUtils004"));
     } catch (const std::exception &e) {
         p.state.detail = e.what();
         return false;
