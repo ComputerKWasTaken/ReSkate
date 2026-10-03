@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.1.1 - 2026-10-03
+## v0.1.2 - 2026-10-03
 
 - **Tune no longer offers values that do nothing.** A pass over the game's code found which tuning
   values it reads (527 of the 930 rows). The rest, including the Mode ollie heights and the hippy
@@ -11,6 +11,10 @@
 - Presets no longer contain rules for values the game does not read. Mega Pop and No Speed Wobble
   were rebuilt on the ones it does.
 - The Tune tab says that changes apply as you drag and that the box only locks a value.
+
+## v0.1.1 - 2026-10-03
+
+Packaging only (Thunderstore): `Install.bat` and `Uninstall.bat`. The trainer was unchanged.
 
 ## v0.1.0 - 2026-10-03
 
