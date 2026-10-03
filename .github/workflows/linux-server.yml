@@ -1,0 +1,65 @@
+name: Linux Server
+
+on:
+  push:
+    branches: [linux-server-native, main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Linux x64 Server
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libssl-dev
+
+      - name: Configure
+        run: cmake --preset linux-x64 -DDINGOSDK_BUILD_MULTIPLAYER_TESTS=ON
+
+      - name: Build server
+        run: cmake --build --preset linux-release --parallel 4 --target dingosdk_server
+
+      - name: Run portable tests
+        run: ctest --test-dir build/linux --output-on-failure
+
+      - name: Stage package
+        run: |
+          set -eux
+          package='build/package-linux'
+          mkdir -p "$package/licenses"
+          cp build/linux/ReSkateServer "$package/"
+          cp Server/README-linux.md "$package/"
+          cp Server/README.txt "$package/README-server.txt"
+          cp contrib/reskate-server.service "$package/"
+          cp LICENSE "$package/LICENSE.txt"
+          for library in rapidjson sqlite miniz bcdec; do
+            cp "External/$library/LICENSE.txt" "$package/licenses/$library-LICENSE.txt"
+          done
+          for library in spdlog lz4 zstd steam_networking; do
+            cp "External/$library/LICENSE" "$package/licenses/$library-LICENSE.txt"
+          done
+          cp External/fonts/*-LICENSE.txt "$package/licenses/"
+          file "$package/ReSkateServer"
+
+      - name: Upload Linux server
+        uses: actions/upload-artifact@v7
+        with:
+          name: ReSkateServer-linux-x64-${{ github.sha }}
+          path: build/package-linux/
+          archive: true
+          if-no-files-found: error
+          retention-days: 30
