@@ -10,6 +10,28 @@ Self-update is disabled on Linux (V1) — update by replacing the binary.
 - Steamworks SDK redist beside the binary: `libsteam_api.so` + `steamclient.so`
   (Valve proprietary, not in this repo). Anonymous game-server login, same as Windows.
 
+## Where the Steam `.so` files come from
+
+Same split as Windows (`steam_api64.dll` + `steamclient64.dll`/`tier0_s64.dll`/`vstdlib_s64.dll`):
+the release ZIP is expected to ship them; this repo never vendors Valve binaries
+(see `External/README.md`, `External/manifest.json`).
+
+- `libsteam_api.so`: from the Steamworks SDK `redistributable_bin/linux64/`
+  (official download via `partner.steamgames.com`; any recent 1.x works — the server
+  uses stable flat exports `SteamGameServer015`/`SteamNetworkingSockets012`).
+  It is generic; the app is selected at runtime via `SteamAppId=3354750`.
+- `steamclient.so` (+ `tier0`/`vstdlib` if present): **not** in the SDK.
+  Get it from SteamCMD or a Steam client install, e.g.:
+  ```sh
+  steamcmd +@sSteamCmdForcePlatformType linux +login anonymous +app_update 1007 +quit
+  # then copy steamapps/common/Steamworks\ SDK\ Redist/linux64/steamclient.so
+  # next to ReSkateServer (same folder as libsteam_api.so)
+  ```
+  or copy/symlink an existing client copy (`~/.steam/steam/linux64/steamclient.so`,
+  Valve also documents `~/.steam/sdk64/steamclient.so`). The server `dlopen`s
+  `libsteam_api.so`, which in turn loads `steamclient.so`; either adjacent or
+  `LD_LIBRARY_PATH` works.
+
 Arch/CachyOS:
 
 ```sh
