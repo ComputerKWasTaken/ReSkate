@@ -48,9 +48,14 @@ Expected: 8 passed (`multiplayer_parties`, `server_activity`, `server_speed_chec
 
 1. Put `ReSkateServer` in its own folder with `libsteam_api.so`, `steamclient.so`.
 2. First run writes `ReSkateServer.json`; edit `name` + `admins`, restart.
-3. Optional: `world-layers.json` (export on Windows via
-   `ReSkateServer.exe --export-world-layers "<Skate folder>" world-layers.json`),
-   `Mods/<mod>/reskate-levels.json` for custom maps.
+3. Optional: `world-layers.json` for time-of-day / world layers.
+   Normal server runs only *read* this file (`world_layer_scan::read`, JSON only)
+   and work on Linux — verified. Get it by either:
+   - Windows export once: `ReSkateServer.exe --export-world-layers "<Skate folder>" world-layers.json`,
+     then copy to the Linux folder; or
+   - copy from a Windows player's cache `%LOCALAPPDATA%\ReSkate\cache\<build>\world-layers.json`
+     (same game build; the server tells admins this path in `layer-sync` errors).
+   Without it every player keeps their own layers; with it + `world_layer_sync` the server forces them.
 4. No ports need opening (Steam relay). Optional UDP `27015-27016` (`port`,
    `query_port`) for browser ping + faster joins.
 
@@ -73,8 +78,11 @@ sudo systemctl enable --now reskate-server
 
 - `auto_update` / `update` command: `updates_enabled()==false` on Linux.
   `check_for_update` reports “self-update is not supported on Linux”.
-- `--export-world-layers` needs Windows game + Oodle (`oo2core_9_win64.dll`);
-  on Linux Oodle blocks throw. Export on Windows, copy the JSON over.
+- `--export-world-layers` on Linux: the reader works, the scanner needs the
+  Windows game (`Data/layout.toc` + CAS) and `oo2core_9_win64.dll` (Oodle).
+  Oodle blocks throw `Oodle CAS data is only supported on Windows` (caught,
+  exit 1, no crash). Export on Windows, copy the JSON over — no game needed
+  on the server itself.
 - `content_cache` dir: `%LOCALAPPDATA%` on Windows, `$XDG_CACHE_HOME`/`~/.cache` on Linux.
 - Crypto interop verified: OpenSSL `PKCS5_PBKDF2_HMAC(SHA256, 100k)` +
   `HMAC-SHA256` matches Windows `BCrypt` (checked against Python `hashlib`).

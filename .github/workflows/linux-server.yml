@@ -30,8 +30,8 @@ jobs:
       - name: Configure
         run: cmake --preset linux-x64 -DDINGOSDK_BUILD_MULTIPLAYER_TESTS=ON
 
-      - name: Build server
-        run: cmake --build --preset linux-release --parallel 4 --target dingosdk_server
+      - name: Build server and tests
+        run: cmake --build --preset linux-release --parallel 4
 
       - name: Run portable tests
         run: ctest --test-dir build/linux --output-on-failure
