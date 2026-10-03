@@ -97,6 +97,6 @@ folder>` (CMake option `DINGOSDK_BUILD_TRAINER_TESTS`) lists the tuning values w
 - Pushing is scripted too: the game holds the skater at a speed its trick scripts pick (about 4 m/s
   for taps, up to 9.1 m/s while push is held) and skips its own code for the push tuning values.
   "Top pushing speed" is therefore the trainer's doing: past the game's last step the skater
-  carries on to your number, and a lower number caps every step. Push strength has no effect in
+  carries on to your number, and a lower number caps every step. Auto push is the trainer's doing as well (the game's flag only reaches its animation): once rolling and not braking, the skater gains speed up to the auto push speed. Push strength has no effect in
   this game build and is hidden.
 - Built for one game build (the one ReSkate 1.0.3 supports). A game update needs a new build.

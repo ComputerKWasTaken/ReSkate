@@ -11,7 +11,12 @@
   trick scripts pick), so the value did nothing. Now, holding push carries on past the game's
   9.1 m/s to your number, and a lower number caps pushing. Taps still cruise at the game's
   4 m/s. The Fast and Realistic presets use it.
+- **Auto push works.** The game hands its auto push flag to the animation and nothing comes of it
+  (measured: the same coast-down with it on). With it on, a rolling skater that is not braking
+  now gains speed up to the auto push speed (8 m/s; both are on the Essentials list).
 - **Push strength is hidden:** nothing in this game build reads it while pushes are scripted.
+- Checked without a player, with a scripted controller: marker pad shortcuts (LB+RB+Up saves,
+  LB+RB+Down returns), ollie height, Fast Spins.
 
 ## v0.1.3 - 2026-10-03
 

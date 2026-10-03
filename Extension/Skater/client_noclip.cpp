@@ -218,18 +218,22 @@ void trainer_apply_jump_scale(std::uintptr_t core) noexcept {
 // carries on to `top` times it, and a `top` under 1 holds every step down to that share of
 // the last one. The game's choice of step is left alone: it follows the skater's speed, and a
 // multiplier on every step feeds back into it (measured: x2 ran away to 17 m/s).
+// Auto push: the game hands its flag to the animation and nothing comes of it (measured: the
+// same coast-down with it on). With `cruise` set, a rolling skater that is not braking gains
+// speed gently up to it.
 constexpr float push_gain = 0.2f;  // m/s the game's own push gains each physics step (0 to 4 m/s in 19 steps)
 constexpr float last_step = 0.95f; // of the stock top pushing speed: the game's last step is 9.1 of 9.25 m/s
+constexpr float cruise_gain = 0.15f; // m/s each physics step: the game steers the speed back toward its own, so less does nothing
 struct PushTop {
-    std::atomic<float> top{1}, stock{9.25f};
+    std::atomic<float> top{1}, stock{9.25f}, cruise{};
     std::uintptr_t client{}, entity{};
     std::atomic<ULONGLONG> expires{};
 };
 PushTop& push_top() { static auto* value = new PushTop; return *value; }
 void trainer_push_top(std::uintptr_t core) noexcept {
     auto& p = push_top();
-    const float top = p.top.load(std::memory_order_relaxed);
-    if (top == 1 || GetTickCount64() >= p.expires.load(std::memory_order_acquire)) return;
+    const float top = p.top.load(std::memory_order_relaxed), cruise = p.cruise.load(std::memory_order_relaxed);
+    if ((top == 1 && cruise <= 0) || GetTickCount64() >= p.expires.load(std::memory_order_acquire)) return;
     const auto watch = watched_physics_state();
     if (!watch.valid || watch.state != 100) return; // riding the ground
     SourceLastError error;
@@ -241,6 +245,9 @@ void trainer_push_top(std::uintptr_t core) noexcept {
         if (bodies.core != core || bodies.offboard || bodies.parts.empty()) return;
         SourceReader reader;
         const float target = reader.value<float>(bodies.context, 0x17f4);
+        // What the game's brake code tests: a brake held (bit 2) or one squeezed by some amount (bit 1, +0x1880).
+        const auto requests = reader.value<std::uint32_t>(bodies.context, 0x13c4);
+        const bool braking = (requests & 4u) != 0 || ((requests & 2u) != 0 && std::abs(reader.value<float>(bodies.context, 0x1880)) > 0.05f);
         std::array<std::array<float, 3>, 32> velocities{};
         std::array<std::uint32_t, 32> flags{};
         const auto count = std::min<std::size_t>(bodies.parts.size(), velocities.size());
@@ -249,14 +256,15 @@ void trainer_push_top(std::uintptr_t core) noexcept {
             flags[i] = reader.value<std::uint32_t>(bodies.parts[i], 0x60);
         }
         reader.verify();
-        if (!(target > 0.5f) || !(target < 100.0f)) return;
         const float speed = std::sqrt(velocities[0][0] * velocities[0][0] + velocities[0][2] * velocities[0][2]);
         if (!(speed >= 0.5f) || !(speed < 1000.0f)) return;
         const float stock = p.stock.load(std::memory_order_relaxed);
+        const bool pushed = target > 0.5f && target < 100.0f; // the game has a push speed in mind
         float change = 0;
-        if (top > 1 && target >= stock * last_step && speed >= target * 0.9f) change = std::min(push_gain, target * top - speed);
+        if (pushed && top > 1 && target >= stock * last_step && speed >= target * 0.9f) change = std::min(push_gain, target * top - speed);
         // Pushed speed only: a hill's is faster than the game's target and is left alone.
-        else if (top < 1 && speed > stock * top && speed <= target * 1.1f) change = -std::min(push_gain, speed - stock * top);
+        else if (pushed && top < 1 && speed > stock * top && speed <= target * 1.1f) change = -std::min(push_gain, speed - stock * top);
+        else if (cruise > 0 && !braking && speed >= 1.0f && speed < std::min(cruise, stock * top)) change = std::min(cruise_gain, cruise - speed);
         if (std::abs(change) < 0.005f) return;
         const float scale = (speed + change) / speed;
         // Like the native velocity writers: XYZ at +70 and the dirty bit 8 at +60.
@@ -354,8 +362,9 @@ bool queue_jump_scale(std::uintptr_t client, std::uintptr_t entity, float factor
         return true;
     } catch (...) { return false; }
 }
-void set_push_top(std::uintptr_t client, std::uintptr_t entity, float top, float stock) noexcept {
+void set_push_top(std::uintptr_t client, std::uintptr_t entity, float top, float stock, float cruise) noexcept {
     auto& p = push_top();
+    p.cruise.store(cruise > 0 && cruise < 100 ? cruise : 0.0f, std::memory_order_relaxed);
     p.client = client;
     p.entity = entity;
     p.stock.store(stock > 1 && stock < 100 ? stock : 9.25f, std::memory_order_relaxed);

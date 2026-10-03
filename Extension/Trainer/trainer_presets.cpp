@@ -27,7 +27,7 @@ const std::vector<Link> &value_links() {
 }
 // Only values that do something: read by the game, or linked above.
 std::string_view essential_name(std::string_view key, int *rank) {
-    static constexpr std::array<std::pair<std::string_view, std::string_view>, 20> names{{
+    static constexpr std::array<std::pair<std::string_view, std::string_view>, 21> names{{
         {"physicsmode.jumpmaxheight", "Ollie height (max)"},
         {"physicsmode.jumpminheight", "Ollie height (min, light pop)"},
         {"physicsmode.grindjumpcommonmax", "Pop out of grinds (max)"},
@@ -39,7 +39,8 @@ std::string_view essential_name(std::string_view key, int *rank) {
         {"physicsmode.maxautobodyspinspeed", "Auto body spin speed"},
         {"physicsmode.easybodyspins", "Easy body spins"},
         {"physicspush.maxpushablespeed", "Top pushing speed (m/s, hold push)"},
-        {"physicsmode.autopushenabled", "Auto push"},
+        {"physicsmode.autopushenabled", "Auto push (keeps a rolling skater going)"},
+        {"physicspush.maxspeedforautopush", "Auto push speed (m/s)"},
         {"physicsmode.speedwobblestartspeed", "Speed wobble starts at (m/s)"},
         {"physicsmode.grindlockdist", "Grind lock-on distance"},
         {"physicsgrind.commonfrictionscalar", "Grind friction"},
@@ -87,7 +88,7 @@ const std::vector<BuiltinPreset> &builtin_presets() {
          {{"physicspush.maxpushablespeed !camera", true, 1.8}, {"physicspush.maxspeedforautopush", true, 1.8},
           {"physicsmode.speedwobblestartspeed", true, 3.0}}},
         {"No Speed Wobble", "The board stays steady at any speed.", {{"physicsmode.speedwobblestartspeed", true, 20.0}}},
-        {"Auto Push", "The skater keeps pushing without input.", {{"physicsmode.autopushenabled", false, 1.0}}},
+        {"Auto Push", "Once rolling, the skater keeps gaining speed up to the auto push speed (8 m/s).", {{"physicsmode.autopushenabled", false, 1.0}}},
         {"Hard To Bail", "Much larger impacts are needed before a wipeout.",
          {{"physicswipeout.wipeout_ force", true, 3.0}, {"physicswipeout.wipeout_ acceleration", true, 3.0},
           {"physicswipeout.wipeout_ maxspeed", true, 2.5}, {"physicswipeout.wipeout_ maxdisp", true, 3.0}, {"physicswipeout.wipeout_ relativevel", true, 3.0},

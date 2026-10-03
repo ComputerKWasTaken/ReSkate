@@ -1154,7 +1154,11 @@ void tick(std::uintptr_t base, std::uintptr_t client, bool playing, const std::s
             return e && e->touched && e->stock > 0 && editable() ? static_cast<float>(e->value / e->stock) : 1.0f;
         };
         const auto *top_speed = find_entry("physicspush.maxpushablespeed");
-        set_push_top(client, s.entity, boosts ? ratio("physicspush.maxpushablespeed") : 1.0f, top_speed ? static_cast<float>(top_speed->stock) : 0.0f);
+        // Auto push is the trainer's doing as well: the game's flag reaches only its animation.
+        const auto *auto_push = find_entry("physicsmode.autopushenabled"), *auto_speed = find_entry("physicspush.maxspeedforautopush");
+        const bool cruising = boosts && editable() && auto_push && auto_speed && auto_push->touched && auto_push->value != 0;
+        set_push_top(client, s.entity, boosts ? ratio("physicspush.maxpushablespeed") : 1.0f, top_speed ? static_cast<float>(top_speed->stock) : 0.0f,
+                     cruising ? static_cast<float>(auto_speed->value) : 0.0f);
         for (TrickLaunch launch; take_trick_launch(launch);)
             say(logging::Level::info, std::format("Trainer trick: {} launched at {:.2f} m/s up, x{:.2f}.",
                                                   launch.trick == Trick::boneless ? "boneless" : "no comply", launch.up_speed, launch.factor));
