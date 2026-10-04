@@ -2,6 +2,7 @@
 #include "Engine/Game/Multiplayer/chat_rate.h"
 #include "session.h"
 #include "Extension/Customization/developer_hoodie.h"
+#include "Extension/Customization/developer_board.h"
 #include "Extension/Multiplayer/Remote/native_skater.h"
 #include "Extension/Multiplayer/Voice/voice_chat.h"
 #include "Extension/Multiplayer/Steam/steam_transport.h"
@@ -98,6 +99,7 @@ struct Peer {
     // (0 after a spawn) to spread native recipe applies over frames.
     std::uint64_t cosmetic_revision{}, applied_cosmetics{};
     DeveloperHoodieState developer_hoodie;
+    DeveloperBoardState developer_board;
     AudioBuffer audio;
     std::uint32_t voice_sequence{};
     bool received_voice{};

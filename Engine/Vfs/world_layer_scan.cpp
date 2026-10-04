@@ -12,6 +12,7 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <thread>
 
 namespace dingosdk::world_layer_scan {
 namespace fs = std::filesystem;
@@ -211,12 +212,23 @@ WorldLayerCatalog from_json(const Json& document) {
 WorldLayerCatalog scan(const fs::path& gameRoot) {
     struct Result { std::vector<Reference> references; std::set<std::string> shipped; };
     std::vector<std::future<Result>> pending;
-    for (const auto& source : maps)
-        pending.push_back(std::async(std::launch::async, [&gameRoot, toc = source.toc] {
+    std::vector<std::jthread> workers;
+    pending.reserve(maps.size());
+    workers.reserve(maps.size());
+    // MSVC std::async schedules onto Windows' existing thread pool. During
+    // pre-entrypoint initialization the launcher gates those existing threads,
+    // so waiting for a pool job deadlocks on a cold/stale layer cache. Dedicated
+    // threads are created after the gate and can finish the scan independently.
+    // jthread also joins all started jobs if creation or a scan throws.
+    for (const auto& source : maps) {
+        std::packaged_task<Result()> task([&gameRoot, toc = source.toc] {
             Result result;
             result.references = read_references(gameRoot, toc, result.shipped);
             return result;
-        }));
+        });
+        pending.push_back(task.get_future());
+        workers.emplace_back(std::move(task));
+    }
     WorldLayerCatalog catalog;
     for (std::size_t i = 0; i < maps.size(); ++i) {
         const auto result = pending[i].get();

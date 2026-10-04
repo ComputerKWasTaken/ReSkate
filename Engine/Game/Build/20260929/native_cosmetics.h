@@ -17,6 +17,15 @@ inline constexpr std::uintptr_t publish_materials = 0x1331420;
 inline constexpr std::array<unsigned char, 24> publish_materials_prefix{
     0x48,0x89,0x5c,0x24,0x08,0x89,0x54,0x24,0x10,0x55,0x56,0x57,0x41,0x54,0x41,0x55,
     0x41,0x56,0x41,0x57,0x48,0x83,0xec,0x20};
+// Typed per-instance shader setter reached by MaterialInstance:addEsVector.
+// (material, ParamDbKey*, NativeValue*, priority) -> success. Inserts with the
+// engine allocator and preserves the existing priority rules.
+inline constexpr std::uintptr_t set_shader_parameter = 0x1312d00;
+inline constexpr std::array<unsigned char, 24> set_shader_parameter_prefix{
+    0x48,0x89,0x5c,0x24,0x20,0x48,0x89,0x4c,0x24,0x08,0x55,0x56,0x57,0x41,0x54,0x41,
+    0x55,0x48,0x8d,0x6c,0x24,0xc9,0x48,0x81};
+// Initialized ColorRgb type descriptor; validate its type hash, size and index.
+inline constexpr std::uintptr_t color_rgb_type = 0x7780c50;
 // Finds a named entry in a loaded table by the FNV-1a hash of its name:
 // (out, name, table, flag, context) -> out, the fifth passed on the stack.
 // The skater loader's preset lookups reach it through a Lua binding that

@@ -565,6 +565,9 @@ NativeAnimationStats remote_animation_stats() noexcept {
 std::uintptr_t remote_skater_entity() noexcept {
     return watched().entity[peer_slot].load(std::memory_order_acquire);
 }
+std::uintptr_t remote_board_entity() noexcept {
+    return watched().board[peer_slot].load(std::memory_order_acquire);
+}
 std::uint64_t remote_skater_generation() noexcept {
     return remote().generation.load(std::memory_order_acquire);
 }

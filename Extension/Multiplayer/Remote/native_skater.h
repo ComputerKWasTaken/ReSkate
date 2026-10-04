@@ -25,6 +25,7 @@ std::uint64_t remote_pose_updates() noexcept;
 std::uint64_t remote_board_pose_updates() noexcept;
 NativeAnimationStats remote_animation_stats() noexcept;
 std::uintptr_t remote_skater_entity() noexcept;
+std::uintptr_t remote_board_entity() noexcept;
 // Changes whenever the current slot's actor is created, removed or destroyed.
 std::uint64_t remote_skater_generation() noexcept;
 // Client thread. Installs the shared animation/destruction hooks without

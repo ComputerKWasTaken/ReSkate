@@ -445,6 +445,7 @@ void render(Session &s, std::uintptr_t client, const NativeFrame &local, std::ui
         if (was_visible && local.ready && !p.render_failed && p.far_interval && now < p.next_far_sample &&
             !(p.far_for_view && !out_of_view(p, view))) {
             update_developer_hoodie(s.base, remote_skater_entity(), p.member.id, remote_skater_generation(), p.developer_hoodie);
+            update_developer_board(s.base, remote_board_entity(), p.member.id, remote_skater_generation(), p.developer_board);
             present_audio(p);
             update_party_position(&p.render_pose);
             if (labels) label(p);
@@ -521,6 +522,8 @@ void render(Session &s, std::uintptr_t client, const NativeFrame &local, std::ui
         }
         update_developer_hoodie(s.base, p.visible ? remote_skater_entity() : 0, p.member.id,
                                  remote_skater_generation(), p.developer_hoodie);
+        update_developer_board(s.base, p.visible ? remote_board_entity() : 0, p.member.id,
+                               remote_skater_generation(), p.developer_board);
         if (!p.visible) {
             stop_remote_audio();
             p.presented_audio.reset();

@@ -1,5 +1,6 @@
 #include "runtime_internal.h"
 #include "Extension/Customization/developer_hoodie.h"
+#include "Extension/Customization/developer_board.h"
 #include "Extension/Assets/live_mods.h"
 #include "Engine/Core/Log/logging.h"
 #include "Engine/Core/Profiling/profiler.h"
@@ -985,6 +986,7 @@ void tick(std::uintptr_t client, std::uintptr_t update) {
             dingosdk::multiplayer::tick(r.base,client,multiplayer_ready,r.multiplayer_map,load_multiplayer_map);
         }
         dingosdk::tick_local_developer_hoodie(r.base, client, multiplayer_ready);
+        dingosdk::tick_local_developer_board(r.base, client, multiplayer_ready);
         // The session spawns and places skaters and can teleport: check the camera again.
         tick_state.camera_issue.reset();
         // The spectate camera follows a moving skater, so it runs every client tick, after the

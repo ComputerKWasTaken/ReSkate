@@ -93,6 +93,7 @@ add_library(dingosdk_runtime SHARED
     Extension/World/loading_screen.cpp
     Extension/Customization/preset_lookup_guard.cpp
     Extension/Customization/developer_hoodie.cpp
+    Extension/Customization/developer_board.cpp
     Extension/Skater/skater_model.cpp
     Extension/Skater/skater_observer.cpp
     Extension/Skater/client_source_spawn.cpp
