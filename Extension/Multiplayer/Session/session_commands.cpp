@@ -711,6 +711,12 @@ std::string command(std::string_view action, std::string_view argument, std::str
         unsigned tps = multiplayer_default_tps;
         std::string_view lobby_name;
         auto visibility = argument;
+        // Menus queue host and join and never see this result: show a refusal as the status.
+        const auto refuse = [&s](std::string reason) {
+            s.status = std::move(reason);
+            publish(s);
+            return s.status;
+        };
         if (action == "host") {
             const auto space = argument.find(' ');
             if (space != std::string_view::npos) {
@@ -722,16 +728,16 @@ std::string command(std::string_view action, std::string_view argument, std::str
                 const auto result = std::from_chars(number.data(), number.data() + number.size(), capacity);
                 if (result.ec != std::errc{} || result.ptr != number.data() + number.size() || capacity < 2 ||
                     capacity > multiplayer_lobby_player_limit)
-                    return "Choose a player limit from 2 to " + std::to_string(multiplayer_lobby_player_limit) + ".";
+                    return refuse("Choose a player limit from 2 to " + std::to_string(multiplayer_lobby_player_limit) + ".");
             }
             if (!visibility.empty() && visibility != "code" && visibility != "public")
-                return "Use mp host code <limit> [lobby name] or mp host public <limit> [lobby name].";
+                return refuse("Use mp host code <limit> [lobby name] or mp host public <limit> [lobby name].");
             if (configured_host) {
                 const auto split = lobby_name.find(' ');
                 const auto rate = lobby_name.substr(0, split);
                 const auto result = std::from_chars(rate.data(), rate.data() + rate.size(), tps);
                 if (result.ec != std::errc{} || result.ptr != rate.data() + rate.size() || !valid_multiplayer_tps(tps))
-                    return "Choose 20, 30, 60, or 120 TPS before hosting.";
+                    return refuse("Choose 20, 30, 60, or 120 TPS before hosting.");
                 lobby_name = split == std::string_view::npos ? std::string_view{} : lobby_name.substr(split + 1);
             }
             const auto first = lobby_name.find_first_not_of(' ');
@@ -739,16 +745,16 @@ std::string command(std::string_view action, std::string_view argument, std::str
                 : lobby_name.substr(first, lobby_name.find_last_not_of(' ') - first + 1);
             if (lobby_name.size() > 128 || std::any_of(lobby_name.begin(), lobby_name.end(),
                 [](unsigned char c) { return c < 32 || c == 127; }))
-                return "Lobby names must be at most 128 bytes with no control characters.";
+                return refuse("Lobby names must be at most 128 bytes with no control characters.");
             // A lobby browsers refuse to list is no use to anyone: say so while it can be fixed.
             if (text::contains_bad_words(lobby_name))
-                return "That lobby name contains blocked words. Choose another one.";
+                return refuse("That lobby name contains blocked words. Choose another one.");
         }
         std::optional<Invite> invitation;
         if (action == "join") {
             invitation = parse_invite(argument);
             if (!invitation)
-                return "Invalid join code. Paste the complete SteamID-session code from the host.";
+                return refuse("Invalid join code. Paste the complete SteamID-session code from the host.");
         }
         stop(s, "Starting multiplayer...");
         s.chat.clear(); // A new session starts with an empty chat.

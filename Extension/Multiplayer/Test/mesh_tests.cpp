@@ -704,6 +704,7 @@ void tick_settings_checks() {
         const auto epoch = configured.epoch;
         (void)command("host-config", "code 8 45 Invalid");
         check(configured.epoch == epoch && configured.tps == rate, "Invalid TPS replaced an active session");
+        check(configured.status == "Choose 20, 30, 60, or 120 TPS before hosting.", "A refused host left no status for the menu");
         stop(configured, "TPS fixture");
         Simulation sim(4, rate);
         sim.add(); sim.add(); sim.run(70);
