@@ -46,10 +46,10 @@ const fb::BundleAsset* GameBundle::find_chunk(const fb::Guid& id, std::size_t* i
 }
 
 GameData::GameData(fs::path gameRoot)
-    : gameRoot_(std::move(gameRoot)), archives_(gameRoot_ / L"Data", read_layout(gameRoot_ / L"Data" / L"layout.toc").root) {}
+    : gameRoot_(std::move(gameRoot)), archives_(gameRoot_ / "Data", read_layout(gameRoot_ / "Data" / "layout.toc").root) {}
 
 fb::TocDocument GameData::read_toc(std::string_view relative) const {
-    const auto path = gameRoot_ / L"Data" / fs::path(relative);
+    const auto path = gameRoot_ / "Data" / fs::path(relative);
     std::ifstream input(path, std::ios::binary);
     if (!input) throw std::runtime_error("Cannot open " + path_utf8(path));
     std::vector<std::byte> bytes(static_cast<std::size_t>(fs::file_size(path)));

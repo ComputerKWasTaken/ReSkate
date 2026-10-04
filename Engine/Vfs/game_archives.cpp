@@ -43,7 +43,7 @@ std::vector<std::uint32_t> GameArchives::chunks_in(const std::string& directory)
 GameArchives::GameArchives(fs::path root, const native_db::Node& layout) : root_(std::move(root)) {
     std::map<std::set<std::uint16_t>, std::vector<std::string>> byArchives;
     std::error_code error;
-    const auto win32 = root_ / L"Win32";
+    const auto win32 = root_ / "Win32";
     for (fs::recursive_directory_iterator it(win32, error), end; it != end && !error; it.increment(error)) {
         if (!it->is_regular_file(error) || error) { error.clear(); continue; }
         if (lower(it->path().extension().string()) != ".cas") continue;
@@ -106,7 +106,7 @@ fb::BinaryBundle GameArchives::read_manifest(const fs::path& root, const fb::Cas
 
 std::vector<std::byte> GameArchives::read(const fs::path& root, const fb::CasIdentifier& location,
                                           std::uint32_t offset, std::uint32_t size) const {
-    const auto path = root / L"Win32" / fs::path(directory(location.installChunk)) /
+    const auto path = root / "Win32" / fs::path(directory(location.installChunk)) /
         fs::path(archive_file(location.archive));
     std::ifstream input(path, std::ios::binary);
     if (!input) throw std::runtime_error("Cannot open " + path_utf8(path));
@@ -126,7 +126,7 @@ std::string GameArchives::describe(const fb::CasIdentifier& location) const {
 std::optional<std::uint64_t> GameArchives::archive_size(const fs::path& root, const fb::CasIdentifier& location) {
     const auto* directory = find_directory(location.installChunk);
     if (!directory) return std::nullopt;
-    const auto path = root / L"Win32" / fs::path(*directory) / fs::path(archive_file(location.archive));
+    const auto path = root / "Win32" / fs::path(*directory) / fs::path(archive_file(location.archive));
     const auto known = sizes_.find(path.wstring());
     if (known != sizes_.end()) return known->second;
     std::error_code error;
