@@ -263,7 +263,9 @@ void tune_tab(SkateMenu &menu, const Model &model, const CallbacksV3 &callbacks,
     ImGui::TextDisabled("%zu values changed", view.touched);
     end_card();
 
+    ImGui::BeginDisabled(!can_edit);
     trick_heights(menu, callbacks, p, view);
+    ImGui::EndDisabled();
 
     if (p.mode == 2) {
         begin_card(menu, "preset-save", "YOUR PRESETS", "Save what is changed right now");
@@ -311,6 +313,9 @@ void tune_tab(SkateMenu &menu, const Model &model, const CallbacksV3 &callbacks,
     ImGui::Spacing();
     ImGui::SeparatorText(p.mode == 2 ? "EVERY VALUE" : "FINE TUNING");
     if (p.mode == 2) {
+        // The list includes the game's tuning classes, which the trainer has to find in memory
+        // before an edit to one does anything: with the list open, it looks now.
+        trainer::note_class_list_shown();
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.42f);
         ImGui::InputTextWithHint("##search", "Search every value...", p.search.data(), p.search.size());
         ImGui::SameLine();

@@ -629,6 +629,70 @@ void party_checks() {
     check(!host.local_party && host.parties.parties().empty(), "A guest who left the lobby stayed in the host's party");
     std::cout << "Lobby parties: nobody by default, invites, two parties, party chat, leaving and departures passed.\n";
 }
+// What a host changes outside its physics tuning (the trainer's class values and trick
+// multipliers) reaches its guests while it sets everyone's physics: when it changes, to a
+// player who joins later, and from nobody but the host.
+void physics_extras_checks() {
+    Simulation sim;
+    for (unsigned i = 0; i < 3; ++i) sim.add();
+    sim.run(60); sim.fresh(3);
+    auto &host = *sim.nodes[0], &first = *sim.nodes[1], &second = *sim.nodes[2];
+    // The simulated players share one process, so they share what "the local player" changed:
+    // only the host's session sends it.
+    const std::vector<std::uint8_t> boosted{1, 2, 3, 4, 5}, calmer{9, 8};
+    const auto physics = [&] { for (auto &node : sim.nodes) update_physics_tuning(*node, sim.local, sim.now); };
+    dingosdk::set_local_physics_extras(boosted);
+    physics();
+    sim.run(10);
+    check(first.host_extras == boosted && second.host_extras == boosted, "The host's physics extras did not reach its guests");
+    check(!host.host_extras, "The host took physics extras for itself");
+
+    update_physics_tuning(first, sim.local, sim.now);
+    std::uint64_t seen{};
+    std::vector<std::uint8_t> handed;
+    check(dingosdk::session_tuning_enforced() && dingosdk::host_physics_extras(seen, handed) && handed == boosted,
+          "A guest's game was not handed the host's physics extras");
+    update_physics_tuning(host, sim.local, sim.now);
+    check(!dingosdk::session_tuning_enforced(), "A host was told another player sets its physics");
+
+    auto &late = sim.add();
+    sim.run(60); sim.fresh(4);
+    check(late.host_extras == boosted, "A player who joined later did not get the host's physics extras");
+
+    dingosdk::set_local_physics_extras(calmer);
+    physics();
+    sim.run(10);
+    check(first.host_extras == calmer && second.host_extras == calmer && late.host_extras == calmer,
+          "A change to the host's physics extras did not reach its guests");
+
+    // A guest cannot set the others' physics.
+    auto forged = packet(first, PacketKind::physics_extras, sim.now);
+    forged.extras = {6, 6, 6};
+    broadcast(first, forged, true, false, sim.now);
+    sim.run(10);
+    check(second.host_extras == calmer && late.host_extras == calmer && !host.host_extras,
+          "A guest's physics extras were taken for the host's");
+
+    // Back to the game's own: sent, so no guest keeps what it had.
+    dingosdk::set_local_physics_extras({});
+    physics();
+    sim.run(10);
+    check(first.host_extras && first.host_extras->empty() && second.host_extras && second.host_extras->empty(),
+          "Guests kept physics extras the host no longer has");
+
+    // Enforcement off: nothing kept for late joiners, and a guest's game is its own again.
+    host.enforce_tuning = false;
+    host.roster_dirty = true;
+    physics();
+    sim.run(20);
+    check(host.extras_packet.empty() && !host.sent_extras, "A host that stopped setting everyone's physics kept its extras packet");
+    check(!first.enforce_tuning, "The guest was not told the host stopped setting everyone's physics");
+    update_physics_tuning(first, sim.local, sim.now);
+    check(!dingosdk::session_tuning_enforced(), "A guest stayed under the host's physics after the host let go");
+    dingosdk::set_session_tuning_enforced(false);
+    dingosdk::set_host_physics_extras({});
+    std::cout << "Physics extras: host to guests, late joiners, changes, forged senders and enforcement off passed.\n";
+}
 // A lobby host keeps a guest whose mods change scoring or physics out of linked activities: the roster
 // flags them for everyone and the host passes none of their throwdown messages on.
 void scoring_checks() {
@@ -1852,6 +1916,7 @@ int main(int argc, char **argv) {
         dingosdk::multiplayer::mesh_checks();
         dingosdk::multiplayer::throwdown_routing_checks();
         dingosdk::multiplayer::party_checks();
+        dingosdk::multiplayer::physics_extras_checks();
         dingosdk::multiplayer::scoring_checks();
         dingosdk::multiplayer::object_sync_checks();
         dingosdk::multiplayer::session_controls_checks();

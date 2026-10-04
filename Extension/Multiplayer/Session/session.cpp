@@ -86,6 +86,12 @@ void stop(Session &s, std::string reason) {
     s.sent_tuning.reset();
     s.tuning_packet.clear();
     s.next_tuning_check = 0;
+    s.host_extras.reset();
+    s.sent_extras = 0;
+    s.extras_packet.clear();
+    s.next_extras_check = 0;
+    set_session_tuning_enforced(false);
+    set_host_physics_extras({});
     s.server_votes = 0;
     set_session_tools_allowed(true, true, true);
     s.object_clears.reset();
@@ -342,12 +348,11 @@ Pose out_of_sight(Pose pose) {
 // local skater and the camera: every frame within 200 m, 20 Hz past it, 10 Hz past 350 m, and
 // every frame again once back inside 190 m. Between samples the skater keeps its pose, which
 // saves the interpolation, the pose copy and the skeleton write for players too far away to see.
+// Only distance decides. Players out of the camera's view were sampled at 20 Hz as well for a
+// while (it saved client-tick time on busy servers), but the game's replays record every skater
+// as it stood each frame and their camera looks wherever it likes afterwards: a player who had
+// been behind the camera moved at 20 Hz in the replay.
 constexpr int far_full_rate_return = 190, far_half_rate_start = 200, far_low_rate_start = 350;
-// Out of the camera's view, players past this many metres are sampled at 20 Hz too: the whole-
-// skeleton interpolation grows with the player count and was most of ReSkate's client-tick cost
-// on busy servers (profiled 2026-10-03). Nearer ones stay every frame for collision and close
-// shadows; one coming into view is sampled that frame.
-constexpr float out_of_view_full_rate = 8.0f;
 // Metres from a player to the nearer of the local skater and the camera (infinite if neither
 // is known).
 float nearest_distance(const Peer &p, const NativeFrame &local, const std::optional<GameView> &view) {
@@ -360,23 +365,6 @@ float nearest_distance(const Peer &p, const NativeFrame &local, const std::optio
     if (local.ready) consider(local.pose.root.position[0], local.pose.root.position[1], local.pose.root.position[2]);
     if (view) consider(view->world[12], view->world[13], view->world[14]);
     return std::sqrt(nearest);
-}
-// Whether a player is certainly outside the camera's view: a 2 m sphere around their body past
-// the camera, or past a side, top or bottom of its view (taken as wide as a 21:9 screen).
-bool out_of_view(const Peer &p, const std::optional<GameView> &view) {
-    if (!view || !(view->vertical_fov > 1 && view->vertical_fov < 175)) return false;
-    const auto &m = view->world;
-    const auto &at = p.render_pose.root.position;
-    const float dx = at[0] - m[12], dy = at[1] + 1.0f - m[13], dz = at[2] - m[14];
-    const float depth = -(dx * m[8] + dy * m[9] + dz * m[10]);
-    const float side = dx * m[0] + dy * m[1] + dz * m[2], height = dx * m[4] + dy * m[5] + dz * m[6];
-    constexpr float radius = 2.0f;
-    if (depth < -radius) return true;
-    const float tan_v = std::tan(view->vertical_fov * 3.14159265f / 360.0f), tan_h = tan_v * (21.0f / 9.0f);
-    const auto outside = [&](float offset, float tangent) {
-        return std::abs(offset) - depth * tangent > radius * std::sqrt(1.0f + tangent * tangent);
-    };
-    return outside(side, tan_h) || outside(height, tan_v);
 }
 std::uint64_t far_sample_interval(const Peer &p, float distance) {
     const auto beyond = [&](int metres) { return distance > static_cast<float>(metres); };
@@ -445,8 +433,7 @@ void render(Session &s, std::uintptr_t client, const NativeFrame &local, std::ui
         const bool was_visible = p.visible;
         // A far player between samples: their skater keeps its pose; sound, the label and
         // the spectate position are still refreshed (sound events are released one per frame).
-        if (was_visible && local.ready && !p.render_failed && p.far_interval && now < p.next_far_sample &&
-            !(p.far_for_view && !out_of_view(p, view))) {
+        if (was_visible && local.ready && !p.render_failed && p.far_interval && now < p.next_far_sample) {
             update_developer_hoodie(s.base, remote_skater_entity(), developer_id(p), remote_skater_generation(), p.developer_hoodie);
             update_developer_board(s.base, remote_board_entity(), developer_id(p), remote_skater_generation(), p.developer_board);
             present_audio(p);
@@ -477,9 +464,6 @@ void render(Session &s, std::uintptr_t client, const NativeFrame &local, std::ui
                                         p.native_status);
                 const auto distance = nearest_distance(p, local, view);
                 p.far_interval = p.visible && !hidden ? far_sample_interval(p, distance) : 0;
-                p.far_for_view = p.visible && !hidden && !p.far_interval && std::isfinite(distance) &&
-                                 distance > out_of_view_full_rate && s.mode != Mode::echo && out_of_view(p, view);
-                if (p.far_for_view) p.far_interval = 50000;
                 p.next_far_sample = now + p.far_interval;
                 // The native work a far player's skater may skip (puppet_cost.cpp).
                 if (p.visible) note_remote_distance(distance);
@@ -700,6 +684,7 @@ void tick(std::uintptr_t base, std::uintptr_t client, bool ready, std::string_vi
         expire_remote_collision(base, now_us());
         if (s.mode == Mode::off) {
             physics_tuning::release(base); // the player's own tuning again after a session
+            set_session_tuning_enforced(false);
             relay_throwdowns(s, ready);
             // Without a session the UI model follows at the same 10 Hz as in one;
             // commands still publish at once.

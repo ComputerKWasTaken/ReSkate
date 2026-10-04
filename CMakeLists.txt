@@ -190,6 +190,10 @@ if(DINGOSDK_BUILD_TRAINER_TESTS)
     target_link_libraries(dingosdk_trainer_tuning_dump PRIVATE dingosdk_game_archives)
     # Fails when the game's data stops naming a tuning value (the trainer's table comes from those names).
     add_test(NAME trainer_tuning_names COMMAND dingosdk_trainer_tuning_dump "${DINGOSDK_TEST_GAME_ROOT}")
+    # What a session's host shares beyond its tuning: the encoding, and what a guest refuses.
+    add_executable(dingosdk_trainer_session_tests Extension/Trainer/Test/session_extras_tests.cpp Extension/Trainer/trainer_session.cpp)
+    target_include_directories(dingosdk_trainer_session_tests PRIVATE "${PROJECT_SOURCE_DIR}")
+    add_test(NAME trainer_session_extras COMMAND dingosdk_trainer_session_tests)
     add_executable(dingosdk_trainer_asset_list Extension/Trainer/Test/asset_list.cpp)
     target_include_directories(dingosdk_trainer_asset_list PRIVATE "${PROJECT_SOURCE_DIR}")
     target_link_libraries(dingosdk_trainer_asset_list PRIVATE dingosdk_game_archives)

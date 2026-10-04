@@ -7,6 +7,7 @@
 #include "Engine/Game/Multiplayer/distance_settings.h"
 #include "Engine/Game/Multiplayer/object_placement.h"
 #include "Engine/Game/Multiplayer/session_model.h"
+#include "Engine/Game/Multiplayer/session_physics.h"
 #include "Engine/Game/Multiplayer/tick_settings.h"
 #include "Engine/Game/World/park_rotation.h"
 #include "Engine/Game/World/world_layers.h"
@@ -24,7 +25,7 @@ namespace dingosdk::multiplayer {
 constexpr std::size_t max_skater_bones = 512, max_board_bones = 64;
 constexpr std::size_t max_packet = 24576;
 constexpr std::size_t packet_header_size = 64;
-constexpr std::uint16_t protocol_version = 38;
+constexpr std::uint16_t protocol_version = 39;
 constexpr std::size_t max_throwdown_message = 4096;
 // Packet::tuning: the host's SkatePhysicsTuning differences (Extension/Skater/physics_tuning.h).
 constexpr std::size_t max_physics_tuning = 16384;
@@ -68,7 +69,11 @@ enum class PacketKind : std::uint16_t {
     party = 28,
     // A player telling the host or dedicated server how its mods change trick scoring
     // (Engine/Vfs/mod_scoring.h): sent once known, again whenever it changes.
-    scoring = 29
+    scoring = 29,
+    // The host's physics that its tuning does not carry: the trainer's tuning-class values and
+    // trick multipliers (Engine/Game/Multiplayer/session_physics.h; opaque here, empty = the
+    // game's own). Like physics_tuning, only the host sends it and a dedicated server never does.
+    physics_extras = 30
 };
 // Packet::party_action. Requests go from a player to whoever hosts, a dedicated server or a
 // lobby's host (party_player = the other player involved, 0 for leave/open/close); invited
@@ -185,6 +190,7 @@ struct Packet {
     std::vector<std::uint8_t> throwdown;      // throwdown: one encoded message (1..max_throwdown_message bytes)
     std::array<float, 3> teleport{};          // teleport: where the receiver goes (world position)
     std::vector<std::uint8_t> tuning;         // physics_tuning: 0..max_physics_tuning bytes
+    std::vector<std::uint8_t> extras;         // physics_extras: 0..max_physics_extras bytes
     PartyAction party_action = PartyAction::leave; // party: what is asked or told
     std::uint64_t party_player{};                   // party: the other player (see PartyAction)
     // scoring: the sender's scoring fingerprint, 0 for the game's own; `text` names the mods

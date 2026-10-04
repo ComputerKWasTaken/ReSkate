@@ -12,8 +12,11 @@ telemetry HUD. It ships no game data: the list of values is built at run time fr
 | **PRACTICE** | Game speed and pause, five marker slots per map (save / go / clear), return to the marker after a bail, teleport to coordinates, copy your position (game or Blender axes). |
 | **MAP & HUD** | Speed and air-time HUD, a read-out after every jump (takeoff speed and angle, height, distance, drop, landing speed, spin and flip), telemetry recording to CSV, and whatever the map's author ships for the trainer. |
 
-Controller: hold **LB + RB**, then D-pad **up** saves the marker, **down** goes to it, **left / right**
-pick the slot.
+The HUD, the jump read-out and the controller shortcuts are off until you switch them on (MAP & HUD,
+PRACTICE): a player who never opens the trainer sees and feels nothing of it.
+
+Controller, once switched on: hold **LB + RB**, then D-pad **up** saves the marker, **down** goes to it,
+**left / right** pick the slot.
 
 Everything is also a console command (`~`): `trainer open [tune|practice|map|realistic|fun|everything]`, `trainer status`, `trainer set <id> <value>`,
 `trainer find <words>`, `trainer preset apply|remove <name>`, `trainer dial <multiplier> <preset name>`,
@@ -47,11 +50,16 @@ trainer, players get your spots and your recommended tuning on the MAP & HUD tab
 
 The trainer goes through ReSkate's own session rules instead of around them:
 
-- A guest whose host sets the physics tuning cannot edit it; the page says so.
+- While a session's host sets everyone's physics (the session's "enforce tuning", on by default),
+  a guest cannot edit anything here; the page says so. They skate with the host's whole setup: its
+  tuning through ReSkate's host-tuning sync, and its class values, trick multipliers and auto push
+  through the session's physics extras (`trainer_session.h`), sent whenever the host changes one
+  and to players who join later. On a dedicated server all of it is the game's own.
+- With that switched off, everyone's physics are their own, and the trick multipliers and auto push
+  follow the host's boosts permission like ReSkate's other boosts.
 - Teleports and markers follow the host's noclip / teleport permission.
 - Game speed is ReSkate's `SimulationTime.TimeScale` setting, which ReSkate locks in a session.
-- A host's tuning changes reach guests through ReSkate's existing host-tuning sync, and servers'
-  `score_check` / `enforce_tuning` see them like any other tuning mod.
+- Servers' `score_check` / `enforce_tuning` see a player's tuning changes like any other tuning mod.
 
 It unlocks no cosmetics or entitlements.
 
@@ -98,9 +106,12 @@ folder>` (CMake option `DINGOSDK_BUILD_TRAINER_TESTS`) lists the tuning values w
   (push speeds, everything on foot, dive and glide, bail speeds...). A live copy has no name to
   look up, so the trainer finds it by searching writable memory for the class's defaults laid
   out as the class lays them out (`trainer_classes.cpp`; the table in `trainer_classes.inc` is
-  generated from the game's own data). The search runs on its own thread a few seconds after a
-  level loads; `trainer classes` says what it found. Native code keeps its own copy of the push
-  speeds, found and written the same way.
+  generated from the game's own data). The search reads all of the game's writable memory, so it
+  only runs for a player with a use for it: one of those values or the flip speed is not the
+  game's own (theirs, or a host's they skate with), or the EVERYTHING list is open. Then it runs
+  on its own thread a few seconds after a level loads, and at most three times per level;
+  `trainer classes` says what it found. Native code keeps its own copy of the push speeds, found
+  and written the same way.
 - "Push speed" scales the push class's speeds (a tapped push, a held one, the top) and the
   tuning's top pushing speed, which only gates whether a push may start. Auto push is the trainer's doing as well (the game's flag only reaches its animation): once rolling and not braking, the skater gains speed up to the auto push speed. Push strength has no effect in
   this game build and is hidden.

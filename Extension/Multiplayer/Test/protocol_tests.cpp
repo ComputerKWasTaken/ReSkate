@@ -789,6 +789,19 @@ void dedicated_server_codec() {
     check(decode(encode(tuning)) && decode(encode(tuning))->tuning == tuning.tuning, "Physics tuning bytes lost");
     tuning.tuning.assign(max_physics_tuning + 1, 0);
     check(reject(tuning), "Oversized physics tuning encoded");
+    Packet extras;
+    extras.kind = PacketKind::physics_extras; extras.session = 9; extras.epoch = 10; extras.map = 11; extras.source = player;
+    check(decode(encode(extras)) && decode(encode(extras))->kind == PacketKind::physics_extras && decode(encode(extras))->extras.empty(),
+          "Empty physics extras (the game's own) lost");
+    extras.extras = {1, 0xde, 0xad, 0xbe, 0xef, 0, 0, 0x80, 0x3f};
+    check(decode(encode(extras)) && decode(encode(extras))->extras == extras.extras, "Physics extras bytes lost");
+    extras.extras.assign(dingosdk::max_physics_extras, 7);
+    check(decode(encode(extras)) && decode(encode(extras))->extras.size() == dingosdk::max_physics_extras, "The largest physics extras lost");
+    extras.extras.assign(dingosdk::max_physics_extras + 1, 0);
+    check(reject(extras), "Oversized physics extras encoded");
+    extras.extras = {1};
+    extras.source = 0;
+    check(reject(extras), "Physics extras from nobody encoded");
     auto moved = roster;
     moved.members = {{player, 20, "Skater"}, {server, 10, "My server"}};
     check(reject(moved), "A game server accepted as a guest");

@@ -462,12 +462,37 @@ void send_roster(Session &s, std::uint64_t now) {
     publish_chat(s); // the host's "/" argument lists (players) follow its own roster
 }
 void update_physics_tuning(Session &s, const NativeFrame &local, std::uint64_t now) {
+    // A guest whose host sets everyone's physics: the player's own edits stand down from the
+    // moment of joining (the roster says otherwise, if it does) and through travel, and what
+    // the host shares beyond its tuning is theirs. A dedicated server shares the game's own.
+    const bool enforced = s.mode == Mode::join && s.enforce_tuning;
+    set_session_tuning_enforced(enforced);
+    if (enforced && s.host_extras && !dedicated_host(s)) set_host_physics_extras(*s.host_extras);
+    else set_host_physics_extras({});
     if (s.mode == Mode::host) {
         physics_tuning::release(s.base);
         if (!s.enforce_tuning) {
             s.sent_tuning.reset();
             s.tuning_packet.clear();
+            s.sent_extras = 0;
+            s.extras_packet.clear();
             return;
+        }
+        // The host's physics beyond its tuning: small, so a look four times a second, and sent
+        // whenever they change (the first time even when they are the game's own, so a guest
+        // never keeps what an earlier spell of enforcement left it).
+        if (now >= s.next_extras_check) {
+            s.next_extras_check = now + 250000;
+            std::vector<std::uint8_t> extras;
+            if (local_physics_extras(s.sent_extras, extras)) {
+                if (extras.size() > max_physics_extras) extras.clear();
+                logging::log(logging::Level::info, logging::Channel::runtime,
+                             "Multiplayer: sending your other physics changes to guests ({} bytes).", extras.size());
+                auto p = packet(s, PacketKind::physics_extras, now);
+                p.extras = std::move(extras);
+                s.extras_packet = encode_wire(p);
+                broadcast(s, p, true, false, now);
+            }
         }
         // Edits to the tuning are rare: a look every 5 s (a 17 KB copy) is enough.
         if (now < s.next_tuning_check) return;

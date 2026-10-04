@@ -94,11 +94,9 @@ struct Peer {
     ReceiveBudget budget;
     PoseBuffer poses;
     Pose render_pose;
-    // Far from the local skater and the camera, or out of the camera's view, render_pose is
-    // sampled every far_interval (0: every frame) and the skater keeps it in between.
+    // Far from the local skater and the camera, render_pose is sampled every far_interval
+    // (0: every frame) and the skater keeps it in between.
     std::uint64_t far_interval{}, next_far_sample{};
-    // far_interval is only for being out of view: coming into view samples at once.
-    bool far_for_view{};
     AppearanceBuffer appearance;
     // Bumped per accepted outfit; render compares it with the one its actor wears
     // (0 after a spawn) to spread native recipe applies over frames.
@@ -161,6 +159,13 @@ struct Session {
     std::optional<std::vector<std::uint8_t>> sent_tuning;
     std::vector<std::uint8_t> tuning_packet;
     std::uint64_t next_tuning_check{};
+    // The physics the tuning does not carry (Engine/Game/Multiplayer/session_physics.h).
+    // Guest: the host's, once it sent them. Host: which of its own were last sent, the packet
+    // that carried them (for players who join later) and when to look again.
+    std::optional<std::vector<std::uint8_t>> host_extras;
+    std::uint64_t sent_extras{};
+    std::vector<std::uint8_t> extras_packet;
+    std::uint64_t next_extras_check{};
     std::uint8_t server_votes{}; // guest of a dedicated server: the votes it runs
     // Host: bumped per "delete all guest objects". Guest: the last value seen
     // (unset until the first roster) and whether a local wipe is outstanding.

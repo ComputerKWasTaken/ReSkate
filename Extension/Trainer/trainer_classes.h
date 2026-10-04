@@ -38,6 +38,9 @@ std::uint64_t class_searches() noexcept;
 std::size_t class_copies(std::size_t index) noexcept;
 // What field `field` (an index into class_fields) should hold. Written by apply_classes.
 void want_class_value(std::size_t field, float value) noexcept;
+// Whether anything is wanted that is not the game's own (a field, or the flip speed): until
+// then there is nothing to write and no reason to search.
+bool classes_wanted() noexcept;
 // Writes the wanted values into every copy found; call each tick. Returns the fields written.
 std::size_t apply_classes() noexcept;
 std::string classes_summary();

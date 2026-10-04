@@ -585,6 +585,7 @@ void networking(Session &s, const NativeFrame &local, std::uint64_t now) {
                 if (joined) {
                     send_roster(s, now);
                     if (!s.tuning_packet.empty()) send_required(s, message.peer, s.tuning_packet);
+                    if (!s.extras_packet.empty()) send_required(s, message.peer, s.extras_packet);
                     send_required(s, message.peer, s.cosmetic_packet);
                     for (const auto &other : active_peers(s))
                         if (other.handshaken && other.member.id != message.peer)
@@ -655,6 +656,12 @@ void networking(Session &s, const NativeFrame &local, std::uint64_t now) {
         if (p.kind == PacketKind::physics_tuning) {
             if (s.mode == Mode::join && message.peer == s.host_id && p.source == s.host_id && !dedicated_host(s))
                 s.host_tuning = std::move(p.tuning);
+            continue;
+        }
+        // And the physics its tuning does not carry (Engine/Game/Multiplayer/session_physics.h).
+        if (p.kind == PacketKind::physics_extras) {
+            if (s.mode == Mode::join && message.peer == s.host_id && p.source == s.host_id && !dedicated_host(s))
+                s.host_extras = p.extras;
             continue;
         }
         if (p.kind == PacketKind::maps) {

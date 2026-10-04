@@ -1,4 +1,5 @@
 #include "trainer.h"
+#include <atomic>
 #include <mutex>
 
 // The snapshots the menu and HUD read. Kept apart from trainer.cpp so the overlay library
@@ -9,6 +10,7 @@ struct Feed {
     std::mutex mutex;
     std::shared_ptr<const View> view = std::make_shared<const View>();
     Telemetry telemetry;
+    std::atomic<bool> class_list_shown{};
 };
 Feed &feed() {
     static auto *value = new Feed;
@@ -36,4 +38,6 @@ void publish(const Telemetry &next) noexcept {
     std::lock_guard lock(f.mutex);
     f.telemetry = next;
 }
+void note_class_list_shown() noexcept { feed().class_list_shown.store(true, std::memory_order_release); }
+bool take_class_list_shown() noexcept { return feed().class_list_shown.exchange(false, std::memory_order_acq_rel); }
 } // namespace dingosdk::trainer

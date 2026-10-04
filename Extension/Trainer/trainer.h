@@ -57,7 +57,7 @@ struct View {
     bool ready{};        // the game's tuning is read and the running game's copy was found
     std::string status;  // why not
     std::string last;    // what the last command answered
-    bool editable{};     // false while a session's host tuning is enforced
+    bool editable{};     // false while a session's host sets everyone's physics (the host's apply)
     std::string blocked; // the reason shown on locked rows
     std::vector<Row> rows;
     std::vector<std::string> groups;
@@ -68,7 +68,7 @@ struct View {
     std::array<Marker, marker_slots> markers{};
     bool auto_return{};
     float return_delay{1.5f};
-    bool pad_shortcuts{true};
+    bool pad_shortcuts{};
     // Height of the hippy jump, which the game scripts instead of tuning (x of its own height).
     float hippy_height{1};
     // The same for the no comply and the boneless.
@@ -76,7 +76,7 @@ struct View {
     float offboard_height{1}; // a jump on foot
     float flip_speed{1};      // board flip tricks: x of the game's own speed
     // HUD
-    bool hud{}, hud_jump{true}, logging{};
+    bool hud{}, hud_jump{}, logging{};
     // The loaded map and what its author ships for the trainer (Mods/<mod>/trainer.json).
     std::string map, map_note, map_preset, profile_preset;
     std::vector<Spot> spots;
@@ -112,6 +112,11 @@ std::shared_ptr<const View> view() noexcept;
 Telemetry telemetry() noexcept;
 void publish(std::shared_ptr<const View>) noexcept;
 void publish(const Telemetry &) noexcept;
+// The menu is drawing the list of every value, the game's tuning classes among them. Those
+// have to be found in memory before an edit to one does anything, and the search is only run
+// for a player who has a use for it: this is one. Any thread; the game thread takes the note.
+void note_class_list_shown() noexcept;
+bool take_class_list_shown() noexcept;
 
 // Game thread (trainer.cpp).
 // Each client tick; `playing` while a local skater can exist, `level` the loaded level asset.

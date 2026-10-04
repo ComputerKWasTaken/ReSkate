@@ -1,5 +1,25 @@
 # Changelog
 
+## In ReSkate
+
+Changes made when the trainer moved into ReSkate itself.
+
+- **Nothing happens until you ask.** The jump read-out and the controller shortcuts start off,
+  jumps are written to the log only while the read-out or telemetry recording is on, and trick
+  launches only when the trainer scaled them.
+- **The memory search runs on demand.** It used to run for every player after a level loaded,
+  and up to seven times when it found nothing. Now it runs once one of the tuning classes'
+  values or the flip speed is changed (yours, or a host's you skate with), or the EVERYTHING list
+  is open, and at most three times per level. It also runs again on each level for those
+  players: a level brings fresh copies.
+- **A host's whole setup reaches its guests.** While a session's host sets everyone's physics,
+  guests get its class values, trick multipliers and auto push as well as its tuning, and their
+  own stand down; a player who joins later gets them too. Before, only the tuning travelled, so
+  a host could push or jump further than the guests it was holding to the game's own.
+- **Guests are locked by the session's own switch**, from the moment they join, rather than by
+  whether the host's tuning had arrived yet. A guest's class values also no longer come back
+  after a map change in such a session.
+
 ## v0.3.0 - 2026-10-04
 
 Built on ReSkate 1.0.7.

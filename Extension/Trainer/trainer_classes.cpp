@@ -400,6 +400,14 @@ void want_class_value(std::size_t field, float value) noexcept {
         f.dirty = true;
     }
 }
+bool classes_wanted() noexcept {
+    auto &f = found();
+    std::lock_guard lock(f.mutex);
+    if (f.flip_wanted != 1) return true;
+    for (std::size_t i = 0; i < class_field_count; ++i)
+        if (f.wanted[i] != class_fields[i].stock) return true;
+    return false;
+}
 std::size_t apply_classes() noexcept {
     auto &f = found();
     std::unique_lock lock(f.mutex, std::try_to_lock);

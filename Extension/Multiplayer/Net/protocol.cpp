@@ -340,6 +340,8 @@ std::vector<std::uint8_t> encode(const Packet &p, bool compact_pose, std::uint32
         throw std::invalid_argument("Invalid throwdown message");
     if (p.kind == PacketKind::physics_tuning && (!p.source || p.tuning.size() > max_physics_tuning))
         throw std::invalid_argument("Invalid physics tuning");
+    if (p.kind == PacketKind::physics_extras && (!p.source || p.extras.size() > max_physics_extras))
+        throw std::invalid_argument("Invalid physics extras");
     if (p.kind == PacketKind::party && (!p.source || !valid_party_request(p.party_action, p.party_player)))
         throw std::invalid_argument("Invalid party message");
     if (p.kind == PacketKind::scoring && (!p.source || (!p.text.empty() && !valid_admin_text(p.text))))
@@ -379,7 +381,7 @@ std::vector<std::uint8_t> encode(const Packet &p, bool compact_pose, std::uint32
         p.kind != PacketKind::objects && p.kind != PacketKind::voice && p.kind != PacketKind::chat &&
         p.kind != PacketKind::admin && p.kind != PacketKind::bans && p.kind != PacketKind::maps &&
         p.kind != PacketKind::throwdown && p.kind != PacketKind::teleport && p.kind != PacketKind::physics_tuning &&
-        p.kind != PacketKind::party && p.kind != PacketKind::scoring)
+        p.kind != PacketKind::party && p.kind != PacketKind::scoring && p.kind != PacketKind::physics_extras)
         throw std::invalid_argument("Unknown packet kind");
     const auto payload = greeting ? 72
                          : p.kind == PacketKind::away
@@ -490,6 +492,10 @@ std::vector<std::uint8_t> encode(const Packet &p, bool compact_pose, std::uint32
     if (p.kind == PacketKind::physics_tuning) {
         w.integer(p.tuning.size(), 2);
         w.bytes.insert(w.bytes.end(), p.tuning.begin(), p.tuning.end());
+    }
+    if (p.kind == PacketKind::physics_extras) {
+        w.integer(p.extras.size(), 2);
+        w.bytes.insert(w.bytes.end(), p.extras.begin(), p.extras.end());
     }
     if (p.kind == PacketKind::scoring) {
         w.integer(p.scoring, 8);
@@ -722,6 +728,12 @@ std::optional<Packet> decode(std::span<const std::uint8_t> bytes) noexcept {
             if (!p.source || length > max_physics_tuning || length != bytes.size() - r.at)
                 return {};
             p.tuning.assign(bytes.begin() + static_cast<std::ptrdiff_t>(r.at), bytes.end());
+            r.at = bytes.size();
+        } else if (p.kind == PacketKind::physics_extras) {
+            const auto length = r.integer(2);
+            if (!p.source || length > max_physics_extras || length != bytes.size() - r.at)
+                return {};
+            p.extras.assign(bytes.begin() + static_cast<std::ptrdiff_t>(r.at), bytes.end());
             r.at = bytes.size();
         } else if (p.kind == PacketKind::scoring) {
             p.scoring = r.integer(8);

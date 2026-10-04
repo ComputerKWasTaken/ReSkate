@@ -566,7 +566,8 @@ void Host::receive(std::uint64_t peer, std::span<const std::uint8_t> bytes) {
     }
     if (p.kind == PacketKind::roster) return drop(peer, "Only the server may publish the player roster.");
     if (p.kind == PacketKind::teleport) return drop(peer, "Only the server may teleport players.");
-    if (p.kind == PacketKind::physics_tuning) return; // a listen host's; the server's is the game's own
+    // A listen host's; the server's physics are the game's own.
+    if (p.kind == PacketKind::physics_tuning || p.kind == PacketKind::physics_extras) return;
     if (p.kind == PacketKind::chat) {
         if (!routed_source(p, link->member, peer, true, id_) ||
             link->chat_rate.accept(now_, p.text, 1) != ChatRate::Verdict::accepted)
