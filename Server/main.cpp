@@ -23,6 +23,7 @@
 #endif
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <ctime>
 #include <deque>
@@ -44,6 +45,57 @@ constexpr int restart_for_update = -2;
 std::string update_version;
 std::mutex log_mutex;
 std::ofstream log_file;
+// The console is written by a thread of its own. Windows holds a console's output while text
+// in its window is selected, and a pipe nobody reads fills up: whoever writes then waits. When
+// that was the server loop, the server read nothing from its players until the console let go,
+// and they were gone by then. The log file is still written where the line is made.
+struct Console {
+    std::mutex mutex;
+    std::condition_variable more, drained;
+    std::deque<std::string> lines;
+    std::size_t skipped{};
+    bool writing{}, started{};
+    void write(std::string line) {
+        std::lock_guard lock(mutex);
+        if (!started) {
+            started = true;
+            std::thread([this] { run(); }).detach();
+        }
+        // A console that stays held must not grow this without end: the oldest lines go, and
+        // the file has them all.
+        if (lines.size() >= 4096) {
+            lines.pop_front();
+            ++skipped;
+        }
+        lines.push_back(std::move(line));
+        more.notify_one();
+    }
+    void run() {
+        for (;;) {
+            std::unique_lock lock(mutex);
+            more.wait(lock, [&] { return !lines.empty(); });
+            const auto line = std::move(lines.front());
+            lines.pop_front();
+            const auto missed = std::exchange(skipped, 0);
+            writing = true;
+            lock.unlock();
+            if (missed) std::printf("(%zu earlier lines are only in ReSkateServer.log: the console was not taking output)\n", missed);
+            std::fputs(line.c_str(), stdout);
+            lock.lock();
+            writing = false;
+            if (lines.empty()) drained.notify_all();
+        }
+    }
+    // Waits until everything written so far is on screen, but not for a console that is held.
+    void flush(std::chrono::milliseconds limit) {
+        std::unique_lock lock(mutex);
+        drained.wait_for(lock, limit, [&] { return lines.empty() && !writing; });
+    }
+};
+Console &console() {
+    static auto *value = new Console; // outlives every thread that may still be writing at exit
+    return *value;
+}
 void write_log(const std::string &text) {
     std::lock_guard lock(log_mutex);
     const auto now = std::time(nullptr);
@@ -55,8 +107,8 @@ void write_log(const std::string &text) {
 #endif
     char stamp[32]{};
     std::strftime(stamp, sizeof stamp, "%Y-%m-%d %H:%M:%S", &local);
-    std::printf("[%s] %s\n", stamp + 11, text.c_str());
     if (log_file) log_file << '[' << stamp << "] " << text << std::endl;
+    console().write(std::string("[") + (stamp + 11) + "] " + text + "\n");
 }
 std::atomic<bool> finished{};
 #ifdef _WIN32
@@ -444,6 +496,7 @@ int wmain(int argc, wchar_t **argv) {
             write_log("Installing server update " + update_version + "...");
             install_update(folder());
             write_log("Server update " + update_version + " installed; starting it.");
+            console().flush(std::chrono::seconds(2));
             if (relaunch()) {
                 code = 0;
                 break;
@@ -462,9 +515,10 @@ int wmain(int argc, wchar_t **argv) {
     if (code != 0 && !stopping && own_window()) {
         auto &input = console_input();
         input.take();
-        std::printf("Press Enter to close.\n");
+        console().write("Press Enter to close.\n");
         while (!stopping && input.take().empty()) Sleep(50);
     }
+    console().flush(std::chrono::seconds(2));
     return code;
 }
 #else
@@ -478,6 +532,7 @@ int main(int argc, char **argv) {
             write_log("Installing server update " + update_version + "...");
             install_update(folder());
             write_log("Server update " + update_version + " installed; starting it.");
+            console().flush(std::chrono::seconds(2));
             if (relaunch()) {
                 code = 0;
                 break;
@@ -491,6 +546,7 @@ int main(int argc, char **argv) {
         }
     }
     finished = true;
+    console().flush(std::chrono::seconds(2));
     return code;
 }
 #endif

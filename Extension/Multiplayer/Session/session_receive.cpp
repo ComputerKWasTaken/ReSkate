@@ -334,7 +334,7 @@ void networking(Session &s, const NativeFrame &local, std::uint64_t now) {
         if (!link)
             continue;
         const bool direct_link = s.mode == Mode::join && message.peer != s.host_id;
-        if (!link->budget.accept(now, message.bytes.size(),
+        if (!link->budget.accept(message.arrived ? message.arrived : now, message.bytes.size(),
                                  s.mode == Mode::join && !direct_link ? max_remote_players : 1U)) {
             disconnect(s, message.peer, "Peer exceeded the multiplayer packet limit.");
             if (s.mode == Mode::off)

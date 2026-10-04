@@ -89,6 +89,8 @@ struct SimulatedNetwork {
     static inline std::uint64_t hold_control_to{};
     static inline std::array<unsigned, 3> lane_sends{};
     static inline std::map<std::uint64_t, std::uint64_t> queues;
+    // What a message's arrival time is (TransportMessage::arrived); 0: the transport does not say.
+    static inline std::uint64_t clock{};
     static std::pair<std::uint64_t, std::uint64_t> pair(std::uint64_t a, std::uint64_t b) {
         return {std::min(a, b), std::max(a, b)};
     }
@@ -200,7 +202,7 @@ bool SteamTransport::send(std::uint64_t id, std::span<const std::uint8_t> bytes,
         return true;
     if (!reliable && SimulatedNetwork::lose_unreliable && ++p.unreliable % 5 == 0)
         return true;
-    Impl::bus.at(id)->inbox.push_back({{p.state.local_id, {bytes.begin(), bytes.end()}}, lane});
+    Impl::bus.at(id)->inbox.push_back({{p.state.local_id, {bytes.begin(), bytes.end()}, SimulatedNetwork::clock}, lane});
     return true;
 }
 void SteamTransport::send_batch(std::span<TransportSend> messages) {
@@ -469,6 +471,8 @@ struct Simulation {
     NativeFrame local;
     std::vector<float> positions;
     unsigned capacity, tps;
+    std::size_t held = static_cast<std::size_t>(-1); // a node that is not run: held up, reading nothing
+    bool stamp{};                                     // messages carry when they arrived
     explicit Simulation(unsigned limit = max_players, unsigned rate = 20) : capacity(limit), tps(rate) {
         local.ready = true;
         local.pose.skater.resize(395);
@@ -503,9 +507,10 @@ struct Simulation {
     void run(unsigned frames) {
         for (unsigned i = 0; i < frames; ++i) {
             now += network_tick_us;
+            SimulatedNetwork::clock = stamp ? now : 0;
             for (std::size_t n = 0; n < nodes.size(); ++n) {
                 auto &s = *nodes[n];
-                if (s.mode == Mode::off)
+                if (s.mode == Mode::off || n == held)
                     continue;
                 local.pose.root.position[0] = static_cast<float>(now - 10000000) / 1000000;
                 local.pose.root.position[2] = n < positions.size() ? positions[n] : static_cast<float>(n);
@@ -638,6 +643,56 @@ void party_checks() {
     stop(third, "Left"); sim.run(40);
     check(!host.local_party && host.parties.parties().empty(), "A guest who left the lobby stayed in the host's party");
     std::cout << "Lobby parties: nobody by default, invites, two parties, party chat, leaving and departures passed.\n";
+}
+// A host that is kept from reading for a few seconds (a server whose console held it up) then
+// reads everything its guests sent meanwhile in one go. That is not a flood: nobody is dropped
+// for it, while a real flood still is.
+void stall_checks() {
+    {
+        // 16 s of a player's ordinary traffic read at once, counted by when it arrived.
+        ReceiveBudget backlog;
+        bool kept = true;
+        for (std::uint64_t i = 0; i < 16 * 90; ++i) kept = kept && backlog.accept(5000000 + i * (1000000 / 90), 300);
+        check(kept, "A backlog read after a stall was taken for a flood");
+        ReceiveBudget flood;
+        bool refused = false;
+        for (std::uint64_t i = 0; i < 2000; ++i) refused = refused || !flood.accept(5000000 + i * 100, 300);
+        check(refused, "A flood was let through the packet limit");
+        // Lanes are read one after another, so arrival times step back and forth.
+        ReceiveBudget lanes;
+        refused = false;
+        for (std::uint64_t i = 0; i < 2000; ++i) refused = refused || !lanes.accept(i % 2 ? 9000000 : 9500000, 300);
+        check(refused, "Packets read out of arrival order started the count again");
+    }
+    Simulation sim(max_players, 120);
+    sim.stamp = true;
+    for (unsigned i = 0; i < 4; ++i) sim.add();
+    sim.run(240);
+    auto &host = *sim.nodes[0];
+    const auto connected = [&] {
+        unsigned count{};
+        for (std::size_t n = 1; n < sim.nodes.size(); ++n) {
+            const auto *peer = find_peer(host, sim.nodes[n]->transport.status().local_id);
+            count += peer && peer->handshaken && sim.nodes[n]->mode == Mode::join;
+        }
+        return count;
+    };
+    check(connected() == 3, "The stall fixture did not connect its guests");
+    // Nine seconds unread: under the ten after which a silent player is given up on, and more
+    // than a second's allowance from every guest.
+    const auto sent = sim.nodes[1]->transport.status().sent;
+    sim.held = 0;
+    sim.run(static_cast<unsigned>(9000000 / network_tick_us));
+    sim.held = static_cast<std::size_t>(-1);
+    check(sim.nodes[1]->transport.status().sent - sent > 2ULL * multiplayer_tick_rates.back() + 80 + 32,
+          "The stall fixture did not queue more than the packet limit");
+    sim.run(240);
+    if (host.mode != Mode::host || connected() != 3)
+        for (std::size_t n = 0; n < sim.nodes.size(); ++n)
+            std::cerr << "  node " << n << " mode " << static_cast<int>(sim.nodes[n]->mode) << ": " << sim.nodes[n]->status << "\n";
+    check(host.mode == Mode::host && connected() == 3, "Guests were dropped after their host was held up for a few seconds");
+    SimulatedNetwork::clock = 0;
+    std::cout << "Stalls: a held-up host keeps its guests; floods and out-of-order arrival are still limited.\n";
 }
 // What a host changes outside its physics tuning (the trainer's class values and trick
 // multipliers) reaches its guests while it sets everyone's physics: when it changes, to a
@@ -1934,6 +1989,7 @@ int main(int argc, char **argv) {
         dingosdk::multiplayer::throwdown_routing_checks();
         dingosdk::multiplayer::party_checks();
         dingosdk::multiplayer::physics_extras_checks();
+        dingosdk::multiplayer::stall_checks();
         dingosdk::multiplayer::scoring_checks();
         dingosdk::multiplayer::object_sync_checks();
         dingosdk::multiplayer::session_controls_checks();

@@ -414,10 +414,12 @@ bool Host::accept_data(Guest &source, const Packet &p) {
     }
     return true;
 }
-void Host::receive(std::uint64_t peer, std::span<const std::uint8_t> bytes) {
+void Host::receive(std::uint64_t peer, std::span<const std::uint8_t> bytes, std::uint64_t received_at) {
     auto *link = find(peer);
     if (!link) return;
-    if (!link->budget.accept(now_, bytes.size(), 1U)) return drop(peer, "Peer exceeded the multiplayer packet limit.");
+    // Counted by arrival: after the server was held up, everyone's packets are read at once.
+    if (!link->budget.accept(received_at ? received_at : now_, bytes.size(), 1U))
+        return drop(peer, "Peer exceeded the multiplayer packet limit.");
     bool missing_reference{};
     const auto decoded = link->receiver.receive(bytes, missing_reference, world_);
     if (missing_reference) return;
@@ -764,7 +766,7 @@ void Host::tick(std::uint64_t now) {
         }
         if (link.connected && !guest->connected_at) guest->connected_at = now_;
     }
-    for (const auto &message : transport_.receive()) receive(message.peer, message.bytes);
+    for (const auto &message : transport_.receive()) receive(message.peer, message.bytes, message.arrived);
     receive_cosmetics();
     for (auto it = guests_.begin(); it != guests_.end();) {
         auto &g = *(it++)->second;
