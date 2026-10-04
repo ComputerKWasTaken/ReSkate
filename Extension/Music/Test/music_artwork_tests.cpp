@@ -1,3 +1,4 @@
+#include <winsock2.h>
 #include <Windows.h>
 #include <winhttp.h>
 #include "Extension/Music/music_artwork.h"
@@ -40,6 +41,65 @@ std::pair<DWORD, std::string> fetch(const std::string& url) {
         body.append(buffer.data(), received);
     return {status, body};
 }
+// A minimal HTTP/2 cleartext (h2c) client, the way the game's client connects: send the connection
+// preface, SETTINGS and a HEADERS frame, then collect the DATA frames of the response.
+std::pair<int, std::string> fetch_h2c(unsigned short port, const std::string& path) {
+    SOCKET socket_value = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (socket_value == INVALID_SOCKET) return {};
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_port = htons(port);
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (connect(socket_value, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) != 0) {
+        closesocket(socket_value);
+        return {};
+    }
+    constexpr char preface[] = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+    send(socket_value, preface, 24, 0);
+    const char settings[] = {0, 0, 0, 4, 0, 0, 0, 0, 0};
+    send(socket_value, settings, 9, 0);
+    // HPACK block: :method GET (indexed 2), :scheme http (indexed 6), :path as a literal without
+    // indexing with the static name index 4 and a raw (non-Huffman) value.
+    std::string block;
+    block.push_back(static_cast<char>(0x82));
+    block.push_back(static_cast<char>(0x86));
+    block.push_back(static_cast<char>(0x04));
+    block.push_back(static_cast<char>(path.size()));
+    block.insert(block.end(), path.begin(), path.end());
+    const char headers[] = {0, 0, static_cast<char>(block.size()), 1, 4, 0, 0, 0, 1};
+    send(socket_value, headers, 9, 0);
+    send(socket_value, block.data(), static_cast<int>(block.size()), 0);
+    std::string buffer, body;
+    int status = 0;
+    for (;;) {
+        char chunk[16384];
+        const int got = recv(socket_value, chunk, sizeof(chunk), 0);
+        if (got <= 0) break;
+        buffer.append(chunk, got);
+        bool done = false;
+        while (buffer.size() >= 9) {
+            const auto length = (std::size_t(static_cast<unsigned char>(buffer[0])) << 16) |
+                                (std::size_t(static_cast<unsigned char>(buffer[1])) << 8) | std::size_t(static_cast<unsigned char>(buffer[2]));
+            const auto type = static_cast<unsigned char>(buffer[3]);
+            const auto flags = static_cast<unsigned char>(buffer[4]);
+            const auto stream = ((static_cast<unsigned>(static_cast<unsigned char>(buffer[5])) << 24) |
+                                 (static_cast<unsigned>(static_cast<unsigned char>(buffer[6])) << 16) |
+                                 (static_cast<unsigned>(static_cast<unsigned char>(buffer[7])) << 8) |
+                                 static_cast<unsigned>(static_cast<unsigned char>(buffer[8]))) & 0x7fffffffu;
+            if (buffer.size() < 9 + length) break;
+            const std::string payload = buffer.substr(9, length);
+            buffer.erase(0, 9 + length);
+            if (type == 0x1 && stream == 1 && !payload.empty() && static_cast<unsigned char>(payload[0]) == 0x88) status = 200;
+            if (type == 0x0 && stream == 1) {
+                body += payload;
+                if (flags & 0x1) done = true;
+            }
+        }
+        if (done) break;
+    }
+    closesocket(socket_value);
+    return {status, body};
+}
 }
 int main() try {
     namespace fs = std::filesystem;
@@ -67,6 +127,10 @@ int main() try {
         const auto base = url.substr(0, url.find('/', 7));
         check(fetch(base + "/music-art/unknown.png").first == 404, "unknown route is not served");
         check(fetch(base + "/outside.png").first == 404, "HTTP cannot read arbitrary files");
+        const auto colon = url.find(':', 7), slash = url.find('/', colon);
+        const auto port = static_cast<unsigned short>(std::stoi(url.substr(colon + 1, slash - colon - 1)));
+        const auto [h2status, h2body] = fetch_h2c(port, url.substr(slash));
+        check(h2status == 200 && h2body == bytes, "h2c returns the exact registered PNG");
     }
     std::error_code ec;
     fs::create_directory_symlink(root, root / L"mod" / L"escape", ec);
