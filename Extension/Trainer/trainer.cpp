@@ -33,7 +33,7 @@ namespace {
 namespace tuning = dingosdk::physics_tuning;
 using Vec3 = std::array<float, 3>;
 constexpr float max_coordinate = 1.0e6f;
-constexpr float height_low = 0.05f, height_high = 100.0f; // trick height multipliers
+constexpr float height_low = 0.05f, height_high = 1.0e6f; // trick height multipliers (the sliders stop far short; a typed number need not)
 constexpr std::uint32_t air_states_first = 200, air_states_end = 300;
 constexpr std::uint32_t xinput_up = 0x1, xinput_down = 0x2, xinput_left = 0x4, xinput_right = 0x8,
                         xinput_lb = 0x100, xinput_rb = 0x200;
@@ -380,7 +380,7 @@ double sane(const Entry &e, double value) {
     if (!std::isfinite(value)) return e.stock;
     if (e.kind == Kind::flag) return value != 0 ? 1 : 0;
     if (e.kind == Kind::integer) return std::round(value);
-    if (e.kind == Kind::curve || e.kind == Kind::graph) return std::clamp(value, 0.0, 100.0);
+    if (e.kind == Kind::curve || e.kind == Kind::graph) return std::clamp(value, 0.0, 1.0e6);
     return std::clamp(value, -1.0e6, 1.0e6);
 }
 void apply_entry(Entry &e) {

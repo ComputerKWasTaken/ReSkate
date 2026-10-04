@@ -101,7 +101,7 @@ bool start_trick_heights(std::uintptr_t base) noexcept {
     return h.ready;
 }
 void set_trick_heights(float no_comply, float boneless) noexcept {
-    const auto speed = [](float height) { return std::isfinite(height) && height > 0 ? std::sqrt(std::min(height, 100.0f)) : 1.0f; };
+    const auto speed = [](float height) { return std::isfinite(height) && height > 0 ? std::sqrt(std::min(height, 1.0e6f)) : 1.0f; };
     hooked().no_comply.store(speed(no_comply), std::memory_order_relaxed);
     hooked().boneless.store(speed(boneless), std::memory_order_relaxed);
 }

@@ -126,7 +126,7 @@ void value_row(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const tra
         ImGui::SetNextItemWidth(std::max(px(90), ImGui::GetContentRegionAvail().x - reset - ImGui::GetStyle().ItemSpacing.x));
         const bool scale = row.kind == trainer::Kind::curve || row.kind == trainer::Kind::graph;
         const bool whole = row.kind == trainer::Kind::integer;
-        const double low = scale ? 0.0 : -1.0e6, high = scale ? 100.0 : 1.0e6;
+        const double low = scale ? 0.0 : -1.0e6, high = 1.0e6;
         const auto speed = whole ? 0.1f : scale ? 0.01f
             : static_cast<float>(std::max({std::abs(row.stock), std::abs(value), 0.01}) * 0.004);
         edited = ImGui::DragScalar("##value", ImGuiDataType_Double, &value, speed, &low, &high, whole ? "%.0f" : scale ? "x %.2f" : "%.4g",
@@ -173,8 +173,9 @@ void dial_row(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const trai
     double value = p.active == id ? p.active_value : preset.factor;
     // A preset that turns its value down gets a dial with more room below 1.
     const double low = preset.amount < 1 ? 0.05 : 0.2, high = preset.amount < 1 ? 3.0 : 10.0;
-    ImGui::SetNextItemWidth(std::max(px(90), ImGui::GetContentRegionAvail().x - button - reset - ImGui::GetStyle().ItemSpacing.x * 2));
-    if (ImGui::SliderScalar("##dial", ImGuiDataType_Double, &value, &low, &high, "x %.2f", ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_Logarithmic))
+    const float box = px(64);
+    ImGui::SetNextItemWidth(std::max(px(70), ImGui::GetContentRegionAvail().x - box - button - reset - ImGui::GetStyle().ItemSpacing.x * 3));
+    if (ImGui::SliderScalar("##dial", ImGuiDataType_Double, &value, &low, &high, "x %.2f", ImGuiSliderFlags_Logarithmic) && value > 0)
         trainer_command(menu, callbacks, std::format("dial {} {}", number(value), preset.name));
     if (ImGui::IsItemActive()) {
         p.active = id;
@@ -182,6 +183,13 @@ void dial_row(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const trai
     } else if (p.active == id) {
         p.active.clear();
     }
+    ImGui::SameLine();
+    // Any number at all: the slider only covers the sensible range.
+    double typed = preset.factor;
+    ImGui::SetNextItemWidth(box);
+    if (ImGui::InputDouble("##typed", &typed, 0, 0, "%.6g", ImGuiInputTextFlags_EnterReturnsTrue) && typed > 0)
+        trainer_command(menu, callbacks, std::format("dial {} {}", number(typed), preset.name));
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Type any multiplier and press Enter: the slider's ends are not a limit.");
     ImGui::SameLine();
     if (preset.active) ImGui::PushStyleColor(ImGuiCol_Button, skate_theme::blue);
     const bool pressed = ImGui::Button(preset.name.c_str(), ImVec2(button, 0));
@@ -345,19 +353,31 @@ void tune_tab(SkateMenu &menu, const Model &model, const CallbacksV3 &callbacks,
 
 void trick_heights(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const trainer::View &view) {
     begin_card(menu, "trick-heights", "TRICKS", "1.0 is the game's own");
-    const auto slider = [&](const char *label, const char *option, float value, float &edit, bool &editing, float high = 50.0f) {
+    // `limited`: the game itself stops at the slider's end, so a typed number is held to it too.
+    const auto slider = [&](const char *label, const char *option, float value, float &edit, bool &editing, float high = 50.0f, bool limited = false) {
         field(menu, label);
         ImGui::PushID(option);
         float shown = editing ? edit : value;
-        if (ImGui::SliderFloat("##height", &shown, 0.1f, high, "x %.2f", ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_Logarithmic)) {
+        const float box = px(64);
+        ImGui::SetNextItemWidth(std::max(px(70), ImGui::GetContentRegionAvail().x - box - ImGui::GetStyle().ItemSpacing.x));
+        if (ImGui::SliderFloat("##height", &shown, 0.1f, high, "x %.2f", (limited ? ImGuiSliderFlags_AlwaysClamp : 0) | ImGuiSliderFlags_Logarithmic)) {
             edit = shown;
             editing = true;
         }
         if (ImGui::IsItemDeactivatedAfterEdit()) trainer_command(menu, callbacks, std::format("option {} {:.2f}", option, edit));
-        if (!ImGui::IsItemActive() && editing && std::abs(value - edit) < 0.005f) editing = false;
+        if (!ImGui::IsItemActive() && editing && std::abs(value - edit) < 0.005f * std::max(1.0f, std::abs(edit))) editing = false;
+        ImGui::SameLine();
+        float typed = value;
+        ImGui::SetNextItemWidth(box);
+        if (ImGui::InputFloat("##typed", &typed, 0, 0, "%.6g", ImGuiInputTextFlags_EnterReturnsTrue) && typed > 0) {
+            editing = false;
+            trainer_command(menu, callbacks, std::format("option {} {}", option, typed));
+        }
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip(limited ? "Type a multiplier and press Enter." : "Type any multiplier and press Enter: the slider's end is not a limit.");
         ImGui::PopID();
     };
-    slider("Flip trick speed", "flip_speed", view.flip_speed, p.flip_edit, p.flip_editing, 3.0f);
+    slider("Flip trick speed", "flip_speed", view.flip_speed, p.flip_edit, p.flip_editing, 3.0f, true);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Slows board flips. Above 1 the game's own limit on how fast a board turns takes over.");
     slider("No comply height", "nocomply_height", view.nocomply_height, p.nocomply_edit, p.nocomply_editing);
     slider("Boneless height", "boneless_height", view.boneless_height, p.boneless_edit, p.boneless_editing);
@@ -367,7 +387,7 @@ void trick_heights(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const
         p.hippy_editing = p.nocomply_editing = p.boneless_editing = p.offboard_editing = p.flip_editing = false;
         trainer_command(menu, callbacks, "reset tricks");
     }
-    note("Not tuning values: the game sets these in its trick scripts and flip curves. Ctrl+click a slider to type a number.");
+    note("Not tuning values: the game sets these in its trick scripts and flip curves. Type in the box to go past a slider's end.");
     end_card();
 }
 

@@ -21,6 +21,9 @@ Built on ReSkate 1.0.7.
   and mantle 10, the speed model 8, push 7, bails 5, grind control 3), 243 of 314 in all. The
   71 that were never read in any of it (all of pumping, the double-stick flip metrics, grind
   lean and transition, strong-impact bounces) stay listed as "no use found".
+- **Type any number.** Every dial and trick slider has a box beside it: type a multiplier and
+  press Enter to go past the slider's end (Ollie height x10000 if you like). Curve and graph
+  multipliers and the trick heights no longer stop at x100.
 - The short lists only show values the game was found or seen to read.
 - Torpedo Boost no longer names a value the game does not have.
 
