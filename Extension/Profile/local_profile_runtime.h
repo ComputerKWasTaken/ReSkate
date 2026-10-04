@@ -91,6 +91,8 @@ PlayerCardModel local_profile_player_card();
 bool set_local_player_card_name(std::string_view name);
 ParksModel local_profile_parks();
 bool set_local_park(std::string_view lot, std::string_view layout);
+bool load_random_local_parks();
+bool set_local_park_randomize_on_launch(bool enabled);
 // Transient lobby authority. Guest choices never overwrite saved preferences.
 void set_lobby_park_mode(bool active, bool guest);
 void apply_host_park_choices(const ParkChoices& choices);

@@ -223,12 +223,54 @@ bool set_local_park(std::string_view lot, std::string_view layout) {
         }
         const auto index = static_cast<unsigned>(it - park_lots.begin());
         s.store->save_park_choice(index, layout);
+        r.launch_randomization.pending = false;
         r.model.choices[index] = layout;
         r.sent[index].clear();
         r.model.feedback = "Park choice saved. It loads when BAM's park controller is ready.";
         return true;
     } catch (...) {
         r.model.feedback = "Park choice could not be saved. Check the profile and layout.";
+        return false;
+    }
+}
+bool load_random_local_parks() {
+    auto& s = local_runtime(); auto& r = park_runtime();
+    std::lock_guard lock(s.native_mutex);
+    if (!s.active || !r.active || !s.store) return false;
+    if (r.model.controlled_by_host) {
+        r.model.feedback = "The lobby host controls community park layouts.";
+        return false;
+    }
+    try {
+        auto choices = random_park_choices();
+        // Publish only after all three choices are durably saved together.
+        s.store->save_park_choices(choices);
+        r.model.choices = std::move(choices);
+        r.sent = {}; r.clear_unset = {};
+        r.launch_randomization.pending = false;
+        // Respect an in-flight clear/load delay; the pending load uses the new choice.
+        if (r.pending_lot >= park_lots.size()) r.next_request = 0;
+        r.model.feedback = "Random park choices saved. Loading when the park controller is ready.";
+        return true;
+    } catch (...) {
+        r.model.feedback = "Random park choices could not be saved.";
+        return false;
+    }
+}
+bool set_local_park_randomize_on_launch(bool enabled) {
+    auto& s = local_runtime(); auto& r = park_runtime();
+    std::lock_guard lock(s.native_mutex);
+    if (!s.active || !r.active || !s.store) return false;
+    try {
+        s.store->set_user_value("ReSkate.RandomizeParksOnLaunch", enabled);
+        r.model.randomize_on_launch = enabled;
+        // Enabling schedules the next launch, never an unexpected mid-session load.
+        if (!enabled) r.launch_randomization.pending = false;
+        r.model.feedback = enabled ? "Parks will randomize on the next game launch when you control the layouts." :
+            "Randomize on Launch is off. Your saved layouts will be used.";
+        return true;
+    } catch (...) {
+        r.model.feedback = "Randomize on Launch could not be saved.";
         return false;
     }
 }

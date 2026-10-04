@@ -133,6 +133,7 @@ and change voice, distances, placement and kicks from the Multiplayer menu.
   tpall [player]                Everyone to you (admins in game) or to a player.
   tphere <player>               One player to you (admins in game).
   park <construction|historic|financial> <layout>
+  park random                  Randomize all three park slots (excludes empty lots).
   layer-sync on|off   layer <key> default|on|off
   tod <default|morning|noon|afternoon|evening|night|weatherday|weathernight>
                                 Time of day on every map (needs layer-sync on).

@@ -5,6 +5,7 @@
 #include "Engine/Core/Text/word_filter.h"
 #include "Engine/Game/Build/supported_build.h"
 #include "Engine/Game/World/world_names.h"
+#include "Engine/Game/World/park_randomization.h"
 #ifdef _WIN32
 #include <Windows.h>
 #include <bcrypt.h>
@@ -46,7 +47,7 @@ constexpr std::string_view help_text =
     "tps 20|30|60|120 | voice on|off | voice-range <50-1000> | distances <full> <half> <half-return> <low>\n"
     "placement everyone|admins|nobody | clear-objects | noclip on|off | nobail on|off | boosts on|off | tuning on|off\n"
     "tpall [player] | tphere <player> | votes [map|kick|tod on|off|<percent>] | vote-cancel\n"
-    "park <lot> <layout> | layer-sync on|off | layer <key> default|on|off | tod <time|default>\n"
+    "park <lot> <layout> | park random | layer-sync on|off | layer <key> default|on|off | tod <time|default>\n"
     "activity-log on|off | announce-throwdowns on|off | parties [on|off] | party-size <2-8> | speed-check off|warn|kick\n"
     "score-check [off|warn|kick] | score-allow [<fingerprint>|remove <fingerprint>]\n"
     "admin add|remove <SteamID64> | admins | update | quit";
@@ -1194,6 +1195,10 @@ std::string Host::command(std::string_view line, std::uint64_t admin) {
         return changed("Deleted " + std::to_string(removed) + " placed object" + (removed == 1 ? "." : "s."));
     }
     if (name == "park") {
+        if (lower(argument) == "random") {
+            config_.parks = random_park_choices();
+            return changed("Random layouts selected for every park slot.");
+        }
         const auto [lot_name, layout] = split(argument);
         const auto lot = std::find_if(park_lots.begin(), park_lots.end(), [&](const auto &l) { return l.key == lot_name; });
         if (lot == park_lots.end()) return "park construction|historic|financial <layout, e.g. skatepark_01, or empty>";

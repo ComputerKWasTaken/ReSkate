@@ -175,6 +175,7 @@ public:
     std::uint32_t selected_cosmetic_preset() const;
     void set_selected_cosmetic_preset(std::uint32_t);
     void save_park_choice(unsigned lot, std::string_view id);
+    void save_park_choices(const ParkChoices&);
     void save_world_controls(const WorldControls&);
     void save_graphics_controls(const GraphicsControls&);
     std::uint32_t noclip_binding() const;
