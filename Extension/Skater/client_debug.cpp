@@ -212,7 +212,9 @@ void debug_flight_tick(SourceTrial& trial, std::uintptr_t client, bool ready, bo
         arm.thread.store(GetCurrentThreadId(), std::memory_order_release);
         if (debug.first_person_waiting) {
             debug.first_person_waiting = false;
-            debug.status = "First person on. The camera follows the skater's head.";
+            debug.status = debug.first_person_settings.stabilize
+                ? "First person on. True first person keeps the view level and steady."
+                : "First person on. The camera follows the skater's head.";
         }
     } else {
         next = step_free_flight(debug.flight_matrix, input ? *input : idle, seconds, debug.flight_speed);
@@ -248,6 +250,10 @@ constexpr const char* spring = "FirstPerson.Spring";
 constexpr std::array<const char*, 3> offset{"FirstPerson.OffsetX", "FirstPerson.OffsetY", "FirstPerson.OffsetZ"};
 constexpr std::array<const char*, 3> rotation{"FirstPerson.Pitch", "FirstPerson.Yaw", "FirstPerson.Roll"};
 constexpr std::array<const char*, 4> strength{"FirstPerson.Up", "FirstPerson.Down", "FirstPerson.Left", "FirstPerson.Right"};
+constexpr const char* stabilize = "FirstPerson.Stabilize";
+constexpr const char* follow_flips = "FirstPerson.FollowFlips";
+constexpr const char* board_only = "FirstPerson.ThirdPersonOnFoot";
+constexpr std::array<const char*, 4> steady{"FirstPerson.Smoothing", "FirstPerson.HeadPitch", "FirstPerson.HeadRoll", "FirstPerson.Bob"};
 constexpr ULONGLONG delay_ms = 750;
 
 std::optional<float> number(const char* key) {
@@ -281,6 +287,11 @@ void save_debug(InteractiveDebug& debug) noexcept {
         }
         const std::array<float, 4> strengths{arm.up, arm.down, arm.left, arm.right};
         for (std::size_t i = 0; i < 4; ++i) values.emplace_back(saved::strength[i], static_cast<double>(strengths[i]));
+        values.emplace_back(saved::stabilize, arm.stabilize);
+        values.emplace_back(saved::follow_flips, arm.follow_flips);
+        values.emplace_back(saved::board_only, arm.board_only);
+        const std::array<float, 4> steady{arm.smoothing, arm.head_pitch, arm.head_roll, arm.bob};
+        for (std::size_t i = 0; i < 4; ++i) values.emplace_back(saved::steady[i], static_cast<double>(steady[i]));
         profile_runtime::set_local_values(values);
     } catch (...) { /* Saving is best effort; the choices already apply. */ }
 }
@@ -317,6 +328,12 @@ void load_saved_debug(InteractiveDebug& debug) noexcept {
         const std::array<float*, 4> strengths{&arm.up, &arm.down, &arm.left, &arm.right};
         for (std::size_t i = 0; i < 4; ++i)
             if (const auto value = saved::number(saved::strength[i])) *strengths[i] = *value;
+        if (const auto enabled = profile_runtime::local_preference(saved::stabilize)) arm.stabilize = *enabled;
+        if (const auto enabled = profile_runtime::local_preference(saved::follow_flips)) arm.follow_flips = *enabled;
+        if (const auto enabled = profile_runtime::local_preference(saved::board_only)) arm.board_only = *enabled;
+        const std::array<float*, 4> steady{&arm.smoothing, &arm.head_pitch, &arm.head_roll, &arm.bob};
+        for (std::size_t i = 0; i < 4; ++i)
+            if (const auto value = saved::number(saved::steady[i])) *steady[i] = *value;
         if (first_person::valid(arm)) {
             debug.first_person_settings = arm;
             first_person_arm().settings = arm;
@@ -393,17 +410,29 @@ void debug_action(SourceTrial& trial, std::uintptr_t client, bool can_control, b
         case Action::set_first_person_spring_down: settings.down = request.value; break;
         case Action::set_first_person_spring_left: settings.left = request.value; break;
         case Action::set_first_person_spring_right: settings.right = request.value; break;
+        case Action::set_first_person_stabilize: settings.stabilize = request.enabled; break;
+        case Action::set_first_person_follow_flips: settings.follow_flips = request.enabled; break;
+        case Action::set_first_person_smoothing: settings.smoothing = request.value; break;
+        case Action::set_first_person_head_pitch: settings.head_pitch = request.value; break;
+        case Action::set_first_person_head_roll: settings.head_roll = request.value; break;
+        case Action::set_first_person_bob: settings.bob = request.value; break;
+        case Action::set_first_person_board_only: settings.board_only = request.enabled; break;
         case Action::reset_first_person_arm: settings = {}; break;
         default: break;
         }
         source_require(first_person::valid(settings), "First-person arm setting is outside its supported range.");
         auto& arm = first_person_arm();
-        if (settings.enabled != debug.first_person_settings.enabled || request.action == Action::reset_first_person_arm)
+        if (settings.enabled != debug.first_person_settings.enabled ||
+            settings.stabilize != debug.first_person_settings.stabilize || request.action == Action::reset_first_person_arm)
             arm.spring.reset();
         debug.first_person_settings = settings;
         arm.settings = settings;
         mark_debug_changed(debug);
-        debug.status = "First-person arm settings updated.";
+        debug.status = request.action == Action::set_first_person_stabilize
+            ? (settings.stabilize ? "True first person on: level horizon, steady view." : "True first person off: the view follows the raw head.")
+            : request.action == Action::set_first_person_board_only
+            ? (settings.board_only ? "Third person while walking; first person on the board." : "First person while walking too.")
+            : "First-person settings updated.";
         return;
     }
     if (request.action == overlay::DebugAction::set_free_camera_fov) {
@@ -658,6 +687,42 @@ void debug_action(SourceTrial& trial, std::uintptr_t client, bool can_control, b
     }
     source_require(false, "Unknown debug request.");
 }
+// "Third person on foot": runs only while first person is on or this paused
+// it, so players who never use first person are untouched. Switches through
+// the same actions as the menu toggle, after the state has held briefly.
+void first_person_board_tick(SourceTrial& trial, std::uintptr_t client, bool can_control, bool phase, DWORD error) {
+    auto& debug = trial.debug;
+    // Choosing Freecam or the Park Editor while handed back ends the hand-back.
+    if (debug.first_person_paused && (debug.park_editor || (debug.camera_owned && !debug.first_person)))
+        debug.first_person_paused = false;
+    // With the option off, a hand-back still in progress resumes below.
+    if (!debug.first_person_paused && !(debug.first_person && debug.first_person_settings.board_only)) return;
+    if (!can_control || !phase || debug.park_editor || debug.noclip || debug.editor_transition) return;
+    const auto now = GetTickCount64();
+    const auto on_foot = debug.first_person_settings.board_only ? first_person_on_foot(trial.base, client) : std::optional<bool>(false);
+    if (!on_foot) return;
+    if (*on_foot != debug.first_person_last_on_foot) {
+        debug.first_person_last_on_foot = *on_foot;
+        debug.first_person_foot_since = now;
+    }
+    const auto held = now - debug.first_person_foot_since;
+    if (now < debug.first_person_retry_after) return;
+    try {
+        if (debug.first_person && *on_foot && held >= 250) {
+            debug_action(trial, client, can_control, phase, {overlay::DebugAction::set_first_person, false}, error);
+            debug.first_person_paused = true;
+            debug.status = "On foot: third person until you are back on the board.";
+        } else if (debug.first_person_paused && !*on_foot && held >= 120) {
+            debug_action(trial, client, can_control, phase, {overlay::DebugAction::set_first_person, true}, error);
+            debug.first_person_paused = !debug.first_person;
+        }
+    } catch (const SourceGuard& guard) {
+        debug.status = guard.message;
+        debug.first_person_retry_after = now + 500;
+    } catch (...) {
+        debug.first_person_retry_after = now + 500;
+    }
+}
 }
 }
 
@@ -704,10 +769,14 @@ overlay::DebugModel on_client_debug_tick(std::uintptr_t base, std::uintptr_t cli
     }
     const bool no_bail_allowed = session_no_bail_allowed();
     if (request) {
+        // The player's own First person choice replaces any on-foot hand-back.
+        if (request->action == overlay::DebugAction::set_first_person || request->action == overlay::DebugAction::restore_debug)
+            debug.first_person_paused = false;
         try { debug_action(trial, client, can_control, camera_phase_observed, *request, error.value); }
         catch (const SourceGuard& guard) { debug.status = guard.message; }
         catch (...) { debug.status = "Debug action failed; inspect the current state before retrying."; }
     }
+    first_person_board_tick(trial, client, can_control, camera_phase_observed, error.value);
     std::optional<SourceCameraSnapshot> flight_camera;
     try { debug_flight_tick(trial, client, can_control, camera_phase_observed, flight_input, error.value, flight_camera); }
     catch (const SourceGuard& guard) { debug_stop_noclip(debug); debug.status = guard.message; }
@@ -726,7 +795,8 @@ overlay::DebugModel on_client_debug_tick(std::uintptr_t base, std::uintptr_t cli
         const auto camera = flight_camera ? *flight_camera : source_camera_snapshot(trial, client);
         const bool owned_view = camera.mode == 1 && camera.active == camera.identity.camera;
         model.free_camera = owned_view && !debug.first_person;
-        model.first_person = owned_view && debug.first_person;
+        // Handed back on foot still reads as on, so the toggle can switch it off.
+        model.first_person = (owned_view && debug.first_person) || debug.first_person_paused;
         model.first_person_fov = debug.first_person_fov;
         model.free_camera_fov = debug.free_camera_fov;
         model.camera_available = can_control && camera_phase_observed && !debug.camera_ambiguous;
