@@ -21,7 +21,18 @@ struct CosmeticRuntime {
     // per level load and does not ask again, so the pump retries these once the
     // catalog is ready. Until one succeeds the preset stays in
     // `blocked_loadouts`, so a save cannot write over the outfit on disk.
-    std::map<std::string, void*, std::less<>> pending_loads;
+    //
+    // The loadout manager's array is recorded with it. A record is only written
+    // to when that array is still the same one, bounds and all: inside the
+    // array and on its stride says a record is there, not that it is still
+    // this preset's, and a level load can rebuild the array under us. Writing
+    // one preset's outfit into another's slot would lose a saved character,
+    // which is worse than not applying it at all.
+    struct PendingLoad {
+        void* destination{};
+        std::uintptr_t manager{}, begin{}, end{};
+    };
+    std::map<std::string, PendingLoad, std::less<>> pending_loads;
     // Saved outfit items that were not installed when their preset loaded (a
     // disabled or removed costume mod). The slot shows its default this session;
     // saves keep the original item unless the player changes that slot.

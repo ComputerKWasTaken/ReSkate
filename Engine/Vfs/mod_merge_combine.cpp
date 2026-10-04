@@ -497,6 +497,19 @@ fb::TocDocument combine(const fs::path& baseToc, const fs::path& baseRoot,
                         what = std::to_string(table.added) + " preset(s)";
                         if (table.conflicts)
                             what += ", " + std::to_string(table.conflicts) + " disagreed";
+                        // Mods number their presets alike, so two can share a leaf
+                        // name the table has one row for. Both are registered; say
+                        // whose name the other answers to, so an item that shows
+                        // the wrong preset can be traced to its mod.
+                        std::map<std::size_t, std::pair<std::size_t, std::string>> shadowed;
+                        for (const auto& clash : table.shadowed) {
+                            auto& [count, example] = shadowed[clash.edit];
+                            if (!count++) example = clash.path + " and " + clash.holder;
+                        }
+                        for (const auto& [index, clash] : shadowed)
+                            report.notes.push_back(path_utf8(edits[index]->root.filename()) + ": " +
+                                std::to_string(clash.first) + " preset(s) share a short name with another mod's, e.g. " +
+                                clash.second + "; they are registered by their full path only");
                     } else if (shaderTable) {
                         // Each mod aliases new material keys onto shader programs
                         // and texture sets the base already ships, so the union of

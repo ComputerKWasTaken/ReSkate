@@ -406,6 +406,9 @@ void install_modal(const Fonts& fonts, ModsPanel& panel, ImVec2 size) {
     }
     const float fraction = std::clamp(panel.progress.load(), 0.0f, 1.0f);
     const auto time = static_cast<float>(ImGui::GetTime());
+    // Cancelling is not instant: the worker notices on its next chunk or file.
+    // Say so, or the button looks dead and gets pressed again.
+    const bool cancelling = panel.cancel.load();
     // Its own window over the page: the page's own draw list renders under
     // its children, so a panel drawn there would sit beneath the mod list.
     ImGui::SetNextWindowPos(ImVec2(0, 0));
@@ -419,10 +422,14 @@ void install_modal(const Fonts& fonts, ModsPanel& panel, ImVec2 size) {
     const ImVec2 origin((size.x - extent.x) * 0.5f, (size.y - extent.y) * 0.5f);
     const ImVec2 end(origin.x + extent.x, origin.y + extent.y);
     skate_theme::rough_rect(draw, origin, end, color::blue, 11, g_scale);
-    draw->AddText(fonts.tile, fonts.tile->FontSize, ImVec2(origin.x + S(26), origin.y + S(18)), color::ink, "INSTALLING");
-    if (!activity.empty())
+    draw->AddText(fonts.tile, fonts.tile->FontSize, ImVec2(origin.x + S(26), origin.y + S(18)), color::ink,
+        cancelling ? "CANCELLING" : "INSTALLING");
+    const auto line = cancelling ? std::string("Stopping as soon as the current file is done. "
+                                               "The Mods folder is left as it was.")
+                                 : activity;
+    if (!line.empty())
         draw->AddText(fonts.bold, fonts.bold->FontSize, ImVec2(origin.x + S(26), origin.y + S(70)),
-            rgba(0, 0, 0, 0.78f), activity.c_str(), nullptr, extent.x - S(52));
+            rgba(0, 0, 0, 0.78f), line.c_str(), nullptr, extent.x - S(52));
     skate_theme::striped_bar(draw, ImVec2(origin.x + S(26), origin.y + S(118)),
         ImVec2(end.x - S(26), origin.y + S(134)), fraction, time, g_scale);
     draw->AddText(fonts.bold, fonts.bold->FontSize, ImVec2(origin.x + S(26), origin.y + S(142)), rgba(0, 0, 0, 0.78f),
@@ -431,8 +438,17 @@ void install_modal(const Fonts& fonts, ModsPanel& panel, ImVec2 size) {
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImGui::ColorConvertU32ToFloat4(rgba(0, 0, 0, 0.52f)));
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImGui::ColorConvertU32ToFloat4(rgba(0, 0, 0, 0.66f)));
     ImGui::SetCursorScreenPos(ImVec2(end.x - S(26) - S(130), end.y - S(24) - S(34)));
-    if (ImGui::Button("CANCEL", ImVec2(S(130), S(34)))) panel.cancel = true;
+    ImGui::BeginDisabled(cancelling);
+    const bool pressed = ImGui::Button(cancelling ? "CANCELLING" : "CANCEL", ImVec2(S(130), S(34)));
+    ImGui::EndDisabled();
     ImGui::PopStyleColor(3);
+    // Escape too: the button is the only way out of this panel otherwise.
+    if (!cancelling && (pressed || ImGui::IsKeyPressed(ImGuiKey_Escape, false))) {
+        panel.cancel = true;
+        logging::write(logging::Level::info, logging::Channel::launcher,
+            pressed ? "Mod install cancelled by the Cancel button."
+                    : "Mod install cancelled with Escape.");
+    }
     ImGui::End();
 }
 
