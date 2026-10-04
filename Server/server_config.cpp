@@ -128,8 +128,15 @@ ServerConfig load_config(const std::filesystem::path &file, std::vector<std::str
             if (value.is_string())
                 if (const auto fingerprint = parse_scoring(value.string()))
                     c.score_allow.push_back(*fingerprint);
-    c.port = static_cast<std::uint16_t>(root.value("port", static_cast<unsigned>(c.port)));
-    c.query_port = static_cast<std::uint16_t>(root.value("query_port", static_cast<unsigned>(c.query_port)));
+    // Checked here, not in config_error: once narrowed, 70000 is just port 4464, and the
+    // next save would write that over the owner's typo.
+    const auto read_port = [&](const char *key, std::uint16_t fallback) {
+        const auto value = root.value(key, static_cast<unsigned>(fallback));
+        if (value < 1 || value > 65535) throw std::runtime_error(std::string(key) + " must be 1 to 65535.");
+        return static_cast<std::uint16_t>(value);
+    };
+    c.port = read_port("port", c.port);
+    c.query_port = read_port("query_port", c.query_port);
     c.tps = root.value("tps", c.tps);
     c.voice_chat = root.value("voice_chat", c.voice_chat);
     c.voice_range = root.value("voice_range", c.voice_range);
