@@ -382,11 +382,21 @@ fb::TocDocument combine(const fs::path& baseToc, const fs::path& baseRoot,
         if (casBacked) state.casBacked = true;
         if (!region.files.empty()) state.manifestChunk = region.files.front().location.installChunk;
         if (fresh || state.metadata.empty()) state.metadata = manifest.chunkMetadata;
-        for (auto& entry : flat) {
+        const std::size_t firstFile = casBacked ? 1 : 0;
+        for (std::size_t position = 0; position < flat.size(); ++position) {
+            auto& entry = flat[position];
             entry.base = isBase;
             auto id = asset_key(entry.asset);
-            if (entry.asset.kind == fb::AssetKind::ebx ||
-                entry.asset.kind == fb::AssetKind::resource) {
+            // A copy rewritten above (another mod's change, renumbered collision)
+            // is not this mod's edit and no longer lies in this mod's archives: it
+            // is in the merged patch. Recorded as a contribution it was read back
+            // from the mod's folder at the patch's offset, the read failed, and
+            // the assets that really had two edits (the item collections every
+            // cosmetic mod adds its items to) fell back to one mod's copy.
+            const bool rewritten = renumbered.contains(firstFile + position) ||
+                                   overridden.contains(firstFile + position);
+            if (!rewritten && (entry.asset.kind == fb::AssetKind::ebx ||
+                               entry.asset.kind == fb::AssetKind::resource)) {
                 // The contributor's own copy still sits at its original offset in
                 // its own folder, which is where a later merge reads it from.
                 auto unshifted = entry.file;
