@@ -291,7 +291,12 @@ MergeReport merge_mods(const Catalog& catalog, const MergeObserver& observe, con
             std::erase_if(superbundles, [](const std::string& relative) { return lower(relative) == root_level; });
         }
         if (options.live) report.load_screens = read_load_screens(mods, modFiles, store, baseRoot, gameRoot, report);
-        const auto overrides = collect_asset_overrides(mods, modFiles, store, baseRoot, gameRoot, report);
+        auto overrides = collect_asset_overrides(mods, modFiles, store, baseRoot, gameRoot, report);
+        // Carried chunks point into their mod's archives; move them to where those landed.
+        for (auto& [name, chunks] : overrides.chunks)
+            for (const auto* mod : mods)
+                if (mod->name == name)
+                    for (auto& chunk : chunks) store.shift(chunk.location, chunk.offset, &placements[mod]);
 
         for (const auto& relative : superbundles) {
             if (keepRoot && lower(relative) == root_level) {

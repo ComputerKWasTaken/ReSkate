@@ -147,6 +147,8 @@ fb::TocDocument combine(const fs::path& baseToc, const fs::path& baseRoot,
         std::string example;
     };
     std::map<std::string, ArchiveFault> archiveFaults;
+    // Mods whose added assets went into a copy here: their added chunks come too.
+    std::set<std::string> addedFrom;
 
     const auto absorb = [&](const fb::TocBundle& bundle, const ArchivePlacement* placement,
                             bool isBase, const fs::path& root) {
@@ -300,8 +302,8 @@ fb::TocDocument combine(const fs::path& baseToc, const fs::path& baseRoot,
             std::string example;
             for (std::size_t index = 0; index < casManifest.ebx.size(); ++index) {
                 auto& asset = casManifest.ebx[index];
-                const auto named = overrides.find(lower(asset.name));
-                if (named == overrides.end()) continue;
+                const auto named = overrides.changed.find(lower(asset.name));
+                if (named == overrides.changed.end()) continue;
                 const auto change = named->second.find(asset.sha1);
                 const auto at = 1 + index;
                 if (change == named->second.end() || change->second.mod == modName || at >= region.files.size())
@@ -321,8 +323,37 @@ fb::TocDocument combine(const fs::path& baseToc, const fs::path& baseRoot,
                 report.notes.push_back(modName + ": " + bundle.name + ": " + std::to_string(overridden.size()) +
                     " asset(s) take another mod's change, e.g. " + example);
         }
+        // Assets another mod added to the game's copy of this bundle: this copy
+        // loads instead of the game's on this mod's levels, so it gets them too.
+        std::vector<Asset> additions;
+        if (propagate && casBacked) {
+            if (const auto found = overrides.added.find(key); found != overrides.added.end()) {
+                std::set<std::string, std::less<>> present;
+                for (const auto& asset : casManifest.ebx) present.insert(asset_key(asset));
+                for (const auto& asset : casManifest.resources) present.insert(asset_key(asset));
+                // A copy in the TOC the adder ships itself merges with the adder's bundle and has
+                // its assets already; only copies in other superbundles (maps) need them carried.
+                const auto here = lower(relative);
+                for (const auto& addition : found->second) {
+                    if (addition.mod == modName || addition.asset.kind == fb::AssetKind::chunk ||
+                        addition.toc == here || present.contains(asset_key(addition.asset))) continue;
+                    try {
+                        additions.push_back({addition.asset, store.write(region.files.front().location.installChunk,
+                                                                         manifestArchive, addition.encoded)});
+                        addedFrom.insert(addition.mod);
+                    } catch (const std::exception& error) {
+                        report.notes.push_back(modName + ": " + bundle.name + ": " + addition.asset.name +
+                            " from " + addition.mod + " could not be added (" + error.what() + ")");
+                    }
+                }
+                if (!additions.empty())
+                    report.notes.push_back(modName + ": " + bundle.name + ": " + std::to_string(additions.size()) +
+                        " asset(s) added by other mods, e.g. " + additions.front().asset.name);
+            }
+        }
         // Nothing moved in this bundle: it passes through whole, as before.
-        if (casBacked && !shared && !gridBundle && renumbered.empty() && overridden.empty()) casBacked = false;
+        if (casBacked && !shared && !gridBundle && renumbered.empty() && overridden.empty() && additions.empty())
+            casBacked = false;
 
         for (auto& file : region.files) {
             store.shift(file.location, file.offset, placement);
@@ -333,6 +364,16 @@ fb::TocDocument combine(const fs::path& baseToc, const fs::path& baseRoot,
                 region.files[index] = file;
                 used.emplace(file.location.installChunk, file.location.archive);
             }
+        // Added EBX go after this copy's own EBX and added resources after its own
+        // resources, ahead of its chunks; after the indexed moves above so their
+        // positions still hold.
+        for (auto& addition : additions) {
+            const auto ebx = addition.asset.kind == fb::AssetKind::ebx;
+            const auto at = 1 + casManifest.ebx.size() + (ebx ? 0 : casManifest.resources.size());
+            (ebx ? casManifest.ebx : casManifest.resources).push_back(std::move(addition.asset));
+            region.files.insert(region.files.begin() + static_cast<std::ptrdiff_t>(at), addition.file);
+            used.emplace(addition.file.location.installChunk, addition.file.location.archive);
+        }
         const auto fresh = !states.contains(key);
         if (fresh) { order.push_back(bundle.name); states.emplace(key, BundleState{}); }
         auto& state = states.at(key);
@@ -636,6 +677,20 @@ fb::TocDocument combine(const fs::path& baseToc, const fs::path& baseRoot,
             chunkAt.emplace(chunk.guid, merged.chunks.size());
             merged.chunks.push_back(chunk);
         }
+    }
+    // This superbundle resolves chunks from its own TOC: the audio of a song another
+    // mod added to a bundle copied here has to be listed here as well.
+    for (const auto& name : addedFrom) {
+        const auto found = overrides.chunks.find(name);
+        if (found == overrides.chunks.end()) continue;
+        std::size_t listed{};
+        for (const auto& chunk : found->second) {
+            if (!chunkAt.emplace(chunk.guid, merged.chunks.size()).second) continue;
+            merged.chunks.push_back(chunk);
+            used.emplace(chunk.location.installChunk, chunk.location.archive);
+            ++listed;
+        }
+        if (listed) report.notes.push_back(relative + ": " + std::to_string(listed) + " chunk(s) from " + name);
     }
 
     if (sources.size() > 1) {
