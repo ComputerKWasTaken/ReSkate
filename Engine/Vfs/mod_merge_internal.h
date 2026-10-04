@@ -175,12 +175,37 @@ struct AssetOverride {
     std::uint64_t originalSize{};
     std::vector<std::byte> encoded;   // its payload, as stored in cas
 };
-// By lower-case asset name, then the game's sha1 the change replaces.
-using AssetOverrides = std::map<std::string, std::map<fb::Sha1, AssetOverride>, std::less<>>;
+// An EBX asset a mod added to one of the game's bundles, or a resource it added
+// under the same name as such an asset (a wave's sound-bank). Maps carry their own
+// copy of a bundle like bam_coregameassets, and that copy loads instead of the
+// game's on their levels; an edit to a list there (the master music playlist)
+// propagates as a change, so the asset it now names has to come along too.
+struct AssetAddition {
+    std::string mod;
+    fb::BundleAsset asset;
+    std::vector<std::byte> encoded;   // its payload, as stored in cas
+    // The lower-case relative path of the TOC the mod ships this bundle in. A copy of the
+    // bundle in that same TOC merges with the mod's own bundle and already has the asset;
+    // only copies in other superbundles (a map's level TOC) need it carried.
+    std::string toc;
+};
+struct AssetOverrides {
+    // By lower-case asset name, then the game's sha1 the change replaces.
+    std::map<std::string, std::map<fb::Sha1, AssetOverride>, std::less<>> changed;
+    // By lower-case bundle name, in priority order.
+    std::map<std::string, std::vector<AssetAddition>, std::less<>> added;
+    // By mod folder name: TOC chunks the mod adds that its carried additions name
+    // (a new wave's audio). A map's superbundle resolves chunks from its own TOC,
+    // so wherever the additions go these entries go too. Collected pointing into
+    // the mod's own archives; the merge shifts them to where those archives landed.
+    std::map<std::string, std::vector<fb::TocChunk>, std::less<>> chunks;
 
-// The changes asset mods (mods that add no levels) make to the game's own EBX,
-// the highest-priority mod's change winning. Never throws: an unreadable mod
-// is noted and simply changes nothing elsewhere.
+    [[nodiscard]] bool empty() const noexcept { return changed.empty() && added.empty(); }
+};
+
+// The changes and additions asset mods (mods that add no levels) make to the
+// game's own EBX, the highest-priority mod's version winning. Never throws: an
+// unreadable mod is noted and simply changes nothing elsewhere.
 AssetOverrides collect_asset_overrides(const std::vector<const Mod*>& mods,
                                        const std::map<const Mod*, RelativeFiles>& modFiles,
                                        const CasStore& store, const fs::path& baseRoot,
