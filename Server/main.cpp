@@ -206,6 +206,9 @@ int run(int argc, char **argv, bool skip_update) {
     setvbuf(stdout, nullptr, _IONBF, 0);
     std::signal(SIGINT, on_signal);
     std::signal(SIGTERM, on_signal);
+    // A hosting panel that dies leaves stdout a pipe with no reader. Without this
+    // the next printf kills the server before it logs, saves or signs out of Steam.
+    std::signal(SIGPIPE, SIG_IGN);
     const auto here = folder();
     if (argc == 4 && std::string(argv[1]) == "--export-world-layers") {
         try {
