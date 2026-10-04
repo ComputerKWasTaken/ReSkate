@@ -75,6 +75,16 @@ The menu and console keys can be changed in the launcher's Settings.
 - In game, the **MODS** tab of the ReSkate menu (**Insert**) turns mods on and off and applies the changes.
 - Mods are checked against the game build they were made for. Outdated mods, or mods that can't be merged
   cleanly, are left out with a message naming them, and the rest still load.
+- A mod that adds songs can give them their own playlist in the game's music screen with a
+  `reskate-music.json` in its folder:
+
+  ```json
+  {"schema": 1, "playlists": [{"name": "My Playlist", "songs": ["Artist - Title", "Artist - Other Title"]}]}
+  ```
+
+  Each entry is the song's artist and title exactly as the mod registers them, joined by ` - `. Entries that
+  match no song are ignored, and a playlist with no matching songs is not shown. A file that does not follow
+  this shape is skipped and logged. The songs themselves still have to be added by the mod.
 
 Only install mods you trust. Mods change game data, and custom scripts can run code.
 

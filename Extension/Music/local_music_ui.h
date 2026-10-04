@@ -61,7 +61,7 @@ bool music_ui_text(std::string_view value, std::size_t limit = 255);
 bool music_ui_catalog_valid(const MusicCatalog& catalog, const std::string& favorites);
 
 std::string music_ui_wire(std::string_view id, std::string_view artist, std::string_view title,
-    const std::vector<std::string>* members);
+    const std::vector<std::string>* members, std::string_view name = {}, std::string_view artwork = {});
 
 CosmeticShared music_ui_message(const std::string& wire, bool playlist);
 
