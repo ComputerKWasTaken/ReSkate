@@ -7,6 +7,22 @@
 
 namespace dingosdk::mods::detail {
 
+bool unshift(const ArchivePlacement& placement, std::string_view directory, std::uint16_t& archive,
+             std::uint32_t& offset) {
+    const ArchivePlacement::Spot* block{};
+    std::uint16_t origin{};
+    for (const auto& [from, spot] : placement.at) {
+        if (from.first != directory || spot.archive != archive || spot.offset > offset) continue;
+        // Blocks are appended in archive order, so of two that start at the same
+        // byte the earlier one is empty and the offset is in the later.
+        if (!block || spot.offset >= block->offset) { block = &spot; origin = from.second; }
+    }
+    if (!block) return false;
+    archive = origin;
+    offset = static_cast<std::uint32_t>(offset - block->offset);
+    return true;
+}
+
 CasStore::CasStore(fs::path baseRoot, fs::path output, const native_db::Node& layout)
     : GameArchives(std::move(baseRoot), layout), output_(std::move(output)) {}
 

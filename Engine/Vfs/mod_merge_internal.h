@@ -56,6 +56,14 @@ struct ArchivePlacement {
     std::map<std::pair<std::string, std::uint16_t>, Spot> at;
 };
 
+// Reverses CasStore::shift: turns a placement in the merged patch back into the
+// mod's own archive number and offset there. Several of a mod's archives can
+// share one patch archive (a mod added while the game runs has them all
+// appended to archive 1), so the block is the one the offset falls in, not the
+// first in that archive. False when the mod has no block there.
+bool unshift(const ArchivePlacement& placement, std::string_view directory, std::uint16_t& archive,
+             std::uint32_t& offset);
+
 fb::Sha1 sha1_of(std::span<const std::byte> bytes);
 
 // Where the launch's merge put every installed mod's archives, and which

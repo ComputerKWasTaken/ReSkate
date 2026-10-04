@@ -400,15 +400,9 @@ fb::TocDocument combine(const fs::path& baseToc, const fs::path& baseRoot,
                 // The contributor's own copy still sits at its original offset in
                 // its own folder, which is where a later merge reads it from.
                 auto unshifted = entry.file;
-                if (placement && unshifted.location.patch) {
-                    for (const auto& [origin, spot] : placement->at) {
-                        if (spot.archive != unshifted.location.archive ||
-                            origin.first != store.directory(unshifted.location.installChunk)) continue;
-                        unshifted.location.archive = origin.second;
-                        unshifted.offset = static_cast<std::uint32_t>(unshifted.offset - spot.offset);
-                        break;
-                    }
-                }
+                if (placement && unshifted.location.patch)
+                    if (const auto* directory = store.find_directory(unshifted.location.installChunk))
+                        unshift(*placement, *directory, unshifted.location.archive, unshifted.offset);
                 state.history[id].push_back(
                     {root, unshifted, entry.asset.sha1, entry.asset.resourceMeta, isBase});
             }
