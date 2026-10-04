@@ -49,6 +49,9 @@ struct Catalogs {
         std::vector<std::string> tracks;
     };
     std::map<std::string, MusicPlaylistEntry, std::less<>> music_playlists;
+    // Song ("Artist - Title") -> its cdn:/ cover art: a song record carries a field-10 message
+    // (10.10 artist, 10.11 title, 10.12 artwork).
+    std::map<std::string, std::string, std::less<>> music_song_artwork;
     bool reserved(const std::string& key) const;
 };
 // Read once, on first use. Empty (available == false) when no pack is installed.

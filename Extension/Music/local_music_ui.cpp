@@ -123,8 +123,11 @@ std::string music_ui_wire(std::string_view id, std::string_view artist, std::str
     } else {
         cosmetic_wire_string(presentation, 10, artist);
         cosmetic_wire_string(presentation, 11, title);
+        // Cover art: the content cache song record's cdn:/ id (its field 10.12), resolved like a playlist's.
+        if (const auto url = travel_artwork_url(artwork); !url.empty())
+            cosmetic_wire_string(presentation, 12, url);
     }
-    cosmetic_wire_string(body, 10, presentation); // Artwork intentionally absent.
+    cosmetic_wire_string(body, 10, presentation);
     cosmetic_varint(framed, body.size()); framed += body;
     return framed;
 }
@@ -242,7 +245,7 @@ void update_music_catalog() {
         MusicUiMessages playlists, songs;
         playlists.items.reserve(catalog.playlists.size()); songs.items.reserve(catalog.songs.size());
         for (const auto& playlist : catalog.playlists) playlists.items.push_back(music_ui_message(music_ui_wire(playlist.id, {}, {}, &playlist.songs, playlist.name, playlist.artwork), true));
-        for (const auto& song : catalog.songs) songs.items.push_back(music_ui_message(music_ui_wire(song.id, song.artist, song.title, nullptr), false));
+        for (const auto& song : catalog.songs) songs.items.push_back(music_ui_message(music_ui_wire(song.id, song.artist, song.title, nullptr, {}, song.artwork), false));
         auto& model = game::native_data().models; auto& field = game::native_data().models.field;
         if (!music_ui_current(*pending)) { retry = false; return; }
         {

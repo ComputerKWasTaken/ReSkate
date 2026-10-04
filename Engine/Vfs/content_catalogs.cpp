@@ -78,6 +78,16 @@ void add_music_playlist(Catalogs& out, const std::string& id, const Fields& reco
     out.music_playlists.try_emplace(id, std::move(entry));
 }
 
+// Songs: field 1 is "Artist - Title" and field 10 a message with the artist (10), title (11) and
+// cdn:/ cover art (12). First record for an id wins.
+void add_music_song(Catalogs& out, const std::string& id, const Fields& record) {
+    if (id.find(" - ") == std::string::npos) return;
+    const auto content = message(record, 10);
+    if (!content || !text(*content, 10) || !text(*content, 11)) return;
+    if (const auto artwork = text(*content, 12); artwork && artwork->starts_with("cdn:/"))
+        out.music_song_artwork.try_emplace(id, *artwork);
+}
+
 // Grant lists: repeated `number` entries, each {1: kind, 2: id}.
 struct Grant { std::string kind, id; };
 std::vector<Grant> grants(const Fields& fields, std::uint32_t number) {
@@ -246,6 +256,7 @@ Catalogs read_catalogs(const std::filesystem::path& folder) {
             if (text(*fields, 3) == "entitlement") entitlements.insert(*id);
             add_item(out, *fields);
             add_music_playlist(out, *id, *fields);
+            add_music_song(out, *id, *fields);
             add_challenge(out, *id, *fields);
             add_object_category(out, *id, *fields);
             add_travel(out, *id, *fields);

@@ -114,6 +114,12 @@ bool read_music_catalog(MusicCatalog& result) {
     const auto& cache = content_cache::catalogs();
     std::map<std::string, std::string, std::less<>> playlist_names, playlist_artwork;
     std::size_t cache_playlists = 0, matched = 0, unmatched = 0, added = 0;
+    std::size_t artwork = 0;
+    for (auto& song : snapshot.songs)
+        if (const auto found = cache.music_song_artwork.find(song.id); found != cache.music_song_artwork.end()) {
+            song.artwork = found->second;
+            ++artwork;
+        }
     if (!cache.music_playlists.empty()) {
         std::map<std::string, std::size_t, std::less<>> index;
         for (std::size_t i = 0; i < snapshot.songs.size(); ++i) index.emplace(snapshot.songs[i].id, i);
@@ -143,7 +149,7 @@ bool read_music_catalog(MusicCatalog& result) {
               << ",\"native_playlists\":" << native_playlists
               << ",\"cache_playlists\":" << cache_playlists
               << ",\"matched\":" << matched << ",\"unmatched\":" << unmatched
-              << ",\"added\":" << added << ",\"playlists\":" << playlists.size() << "}";
+              << ",\"added\":" << added << ",\"artwork\":" << artwork << ",\"playlists\":" << playlists.size() << "}";
         dingosdk::logging::event(dingosdk::logging::Channel::music, event.str());
     }
     // Registry order is bucket order, not authored ordering. Use stable IDs for
