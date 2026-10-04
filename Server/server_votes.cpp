@@ -90,9 +90,9 @@ void Host::chat_command(Guest &guest, std::string_view line) {
         return reply(guest, enabled_votes() ? "Start one with /vote map, /vote kick or /vote tod (see /help)."
                                             : "This server has no player votes.");
     }
-    // Admins run any server command from chat, as they do with "mp server".
+    // Admins run any server command from chat, as they do with "mp server". The caller
+    // has already logged the line with any password hidden, so it is not logged again here.
     if (is_admin(guest.member.id)) {
-        log_("[admin] " + guest_name(guest) + ": " + std::string(line));
         const auto id = guest.member.id;
         const auto answer = command(line, id);
         if (auto *still = find(id)) reply(*still, answer.empty() ? std::string("Done.") : answer);
