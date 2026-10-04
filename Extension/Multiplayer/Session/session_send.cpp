@@ -120,6 +120,13 @@ void disconnect(Session &s, std::uint64_t id, const std::string &reason) {
     for (std::size_t i = 0; i < s.used_slots; ++i)
         if (s.peers[i].member.id == id) {
             s.roster_dirty |= s.peers[i].handshaken;
+            // Never admitted: it held a player slot meanwhile. An ID that keeps failing waits
+            // longer each time before its connection is taken again.
+            if (s.mode == Mode::host && !s.peers[i].handshaken) {
+                const auto failures = s.join_backoff.failed(id, s.network_now);
+                logging::log(logging::Level::info, logging::Channel::runtime,
+                             "Multiplayer: {} did not finish joining ({}), attempt {}.", id, reason, failures);
+            }
             reset_peer(s, i);
             break;
         }
@@ -131,6 +138,10 @@ bool send_packet(Session &s, std::uint64_t id, const Packet &p, bool reliable, b
     if (!peer)
         return false;
     auto update = raw.empty() ? peer->sender.prepare(p) : peer->sender.prepare(p, raw, wire);
+    // A packet that cannot be built for anyone is its source's fault, never this recipient's:
+    // nothing is sent, and the recipient is not treated as unreachable.
+    if (update.bytes.empty())
+        return true;
     // A stream and its reliable delta references must always use the same lane.
     if (!s.transport.send(id, update.bytes, reliable || update.establishes_baseline(), fresh, traffic_lane(p.kind)))
         return false;
@@ -334,8 +345,11 @@ void broadcast(Session &s, const Packet &packet, bool reliable, bool fresh, std:
             data.wire = encode_wire_bytes(data.raw);
             data.ready = true;
         }
-        outgoing.push_back({&p, p.sender.prepare(packet, data.raw, data.wire, data.deltas), delivery,
-                            interval});
+        auto update = p.sender.prepare(packet, data.raw, data.wire, data.deltas);
+        // Unbuildable for anyone (see send_packet): skipped, and no recipient is dropped for it.
+        if (update.bytes.empty())
+            continue;
+        outgoing.push_back({&p, std::move(update), delivery, interval});
     }
     if (outgoing.empty())
         return;
@@ -419,11 +433,13 @@ void send_roster(Session &s, std::uint64_t now) {
     p.parks = s.parks;
     p.capacity = s.capacity;
     // Names come from the transport's short-lived name cache, not a Steam call per player.
-    p.members.push_back({p.source, s.epoch, s.transport.name(p.source)});
+    // Steam names are cleaned to what a roster may carry: one that is not would be refused
+    // by every guest, and by this host's own encoder.
+    p.members.push_back({p.source, s.epoch, clean_roster_name(s.transport.name(p.source))});
     p.members.back().scoring = s.local_scoring;
     for (auto &peer : active_peers(s))
         if (peer.handshaken) {
-            peer.member.name = s.transport.name(peer.member.id);
+            peer.member.name = clean_roster_name(s.transport.name(peer.member.id));
             p.members.push_back(peer.member);
         }
     // Parties are the ones the lobby's players formed (session_party.cpp), as on a dedicated

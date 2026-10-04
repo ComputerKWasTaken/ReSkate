@@ -1,6 +1,7 @@
 #pragma once
 #include "Extension/Multiplayer/Net/protocol.h"
 #include <algorithm>
+#include <map>
 #include <stdexcept>
 
 namespace dingosdk::multiplayer {
@@ -100,6 +101,63 @@ struct DirectUploadBudget {
             limit = std::min<unsigned>(max_remote_players - 1, limit + 1);
             recover_at = now + 5000000;
         }
+    }
+};
+// What one player's game sends of each relayed stream, with room to spare: a host passes on
+// no more than this from any one source, whatever the connection's overall budget allows.
+// Outfits: captured twice a second and sent when changed. Counted over five seconds.
+inline constexpr unsigned outfit_burst = 12;
+struct OutfitBudget {
+    std::uint64_t since{};
+    unsigned count{};
+    bool accept(std::uint64_t now) noexcept {
+        if (now < since || now - since >= 5000000) { since = now; count = 0; }
+        return ++count <= outfit_burst;
+    }
+};
+// Skater sound: at most one packet per network tick, a few samples each.
+struct SoundBudget {
+    std::uint64_t since{};
+    std::size_t packets{}, samples{};
+    bool accept(std::uint64_t now, std::size_t count) noexcept {
+        if (now < since || now - since >= 1000000) { since = now; packets = samples = 0; }
+        if (packets >= multiplayer_tick_rates.back() + 30U || samples + count > 400) return false;
+        ++packets;
+        samples += count;
+        return true;
+    }
+};
+// A connection that never finished joining (it timed out, or had the wrong password or code)
+// may try again at once the first time. After that every failure makes its Steam ID wait
+// longer before a host takes its connection again, so one account cannot hold a player slot
+// or try passwords over and over.
+struct JoinBackoff {
+    struct Entry {
+        std::uint64_t until{}, last{};
+        unsigned failures{};
+    };
+    static constexpr std::uint64_t forget_us = 30ULL * 60 * 1000000, longest_us = 10ULL * 60 * 1000000;
+    std::map<std::uint64_t, Entry> entries;
+    // Notes a failed attempt and returns how many this ID has made lately.
+    unsigned failed(std::uint64_t id, std::uint64_t now) {
+        auto &entry = entries[id];
+        if (entry.last && now >= entry.last && now - entry.last > forget_us) entry.failures = 0;
+        ++entry.failures;
+        entry.last = now;
+        const auto wait = entry.failures < 2 ? 0ULL
+                        : std::min<std::uint64_t>(longest_us, 5000000ULL << std::min(entry.failures - 2, 8U));
+        entry.until = now + wait;
+        return entry.failures;
+    }
+    bool waiting(std::uint64_t id, std::uint64_t now) const {
+        const auto found = entries.find(id);
+        return found != entries.end() && now < found->second.until;
+    }
+    void joined(std::uint64_t id) { entries.erase(id); }
+    void prune(std::uint64_t now) {
+        std::erase_if(entries, [&](const auto &entry) {
+            return now >= entry.second.last && now - entry.second.last > forget_us;
+        });
     }
 };
 struct ReceiveBudget {

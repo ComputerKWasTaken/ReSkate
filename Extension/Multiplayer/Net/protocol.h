@@ -205,6 +205,8 @@ bool valid_admin_text(std::string_view) noexcept;
 // The message a player typed, made valid: control characters and broken UTF-8
 // dropped, surrounding blanks trimmed, cut to the byte limit on a character boundary.
 std::string clean_chat_text(std::string_view);
+// A player's name as a roster carries it (valid_roster): the same cleaning, at most 128 bytes.
+std::string clean_roster_name(std::string_view);
 bool valid_pose(const Pose &) noexcept;
 std::vector<std::uint8_t> encode(const Packet &, bool compact_pose = false);
 // The same, with a pose encoded at another update interval (a recipient thinned by

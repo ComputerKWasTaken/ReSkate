@@ -50,12 +50,6 @@ constexpr std::string_view help_text =
     "activity-log on|off | announce-throwdowns on|off | parties [on|off] | party-size <2-8> | speed-check off|warn|kick\n"
     "score-check [off|warn|kick] | score-allow [<fingerprint>|remove <fingerprint>]\n"
     "admin add|remove <SteamID64> | admins | update | quit";
-// A command as the log shows it: the log is plain text, so a new password is left out.
-std::string loggable(std::string_view command) {
-    const auto [verb, argument] = split(command);
-    if (lower(verb) != "password" || argument.empty() || argument == "off") return std::string(command);
-    return std::string(verb) + " <hidden>";
-}
 } // namespace
 
 Host::Host(ServerConfig &config, SteamTransport &transport, Log log)
@@ -90,6 +84,31 @@ Packet Host::packet(PacketKind kind, std::uint64_t now) {
 }
 std::string Host::guest_name(const Guest &g) const {
     return g.member.name.empty() ? std::to_string(g.member.id) : g.member.name;
+}
+// The name a joining player is known by here. It is the one their game sent, which the
+// server cannot check against Steam, so it is made safe to show and to type: never blank,
+// never the server's or ReSkate's own, never read as a SteamID64 by kick or ban (which take
+// a number as one), and never the same as another player's.
+std::string Host::player_name(std::string_view wanted, std::uint64_t id) const {
+    const auto fallback = "Player " + std::to_string(id % 10000);
+    std::string name(trim(wanted));
+    cut_text(name, max_member_name);
+    // Names show in every player's roster, nametags and party UI.
+    if (text::contains_bad_words(name)) name = text::mask_bad_words(name);
+    const auto folded = lower(name);
+    const auto first = split(name).first;
+    const bool digits = !first.empty() && std::all_of(first.begin(), first.end(), [](char c) { return c >= '0' && c <= '9'; });
+    if (name.empty() || folded == "server" || folded == "reskate" || folded == lower(config_.name)) name = fallback;
+    else if (digits) name = "Player " + name;
+    const auto taken = [&](const std::string &candidate) {
+        return std::any_of(guests_.begin(), guests_.end(), [&](const auto &entry) {
+            return entry.first != id && entry.second->handshaken && lower(entry.second->member.name) == lower(candidate);
+        });
+    };
+    auto unique = name;
+    for (unsigned copy = 2; taken(unique) && copy < 1000; ++copy) unique = name + " (" + std::to_string(copy) + ")";
+    cut_text(unique, 128);
+    return unique;
 }
 bool Host::is_admin(std::uint64_t id) const {
     return std::find(config_.admins.begin(), config_.admins.end(), id) != config_.admins.end();
@@ -150,6 +169,9 @@ void Host::apply_layers() {
 bool Host::send_packet(Guest &g, const Packet &p, bool reliable, bool fresh, std::span<const std::uint8_t> raw,
                        std::span<const std::uint8_t> wire) {
     auto update = raw.empty() ? g.sender.prepare(p) : g.sender.prepare(p, raw, wire);
+    // A packet that cannot be built for anyone is its source's fault, never this recipient's:
+    // nothing is sent, and the recipient is not treated as unreachable.
+    if (update.bytes.empty()) return true;
     // A stream and its reliable delta references must always use the same lane.
     if (!transport_.send(g.member.id, update.bytes, reliable || update.establishes_baseline(), fresh, traffic_lane(p.kind)))
         return false;
@@ -307,6 +329,8 @@ void Host::send_maps(Guest &admin) {
     if (send_packet(admin, list, true, false)) admin.maps_sent = true;
 }
 void Host::change_map(std::string_view map) {
+    if (!valid_map_destination(map_destination(map_setting(map))))
+        throw std::invalid_argument("That map does not name a destination.");
     // Everything tied to the old world goes; admission and player slots stay.
     for (auto &[id, guest] : guests_) {
         auto &g = *guest;
@@ -350,10 +374,17 @@ void Host::drop(std::uint64_t id, const std::string &reason) {
         roster_dirty_ = true;
         log_(name + " left (" + reason + ")");
         activity_.left(id);
+    } else {
+        // Never admitted: it held a player slot meanwhile, so it shows in the log, and an ID
+        // that keeps failing waits longer each time before its connection is taken again.
+        const auto failures = join_backoff_.failed(id, now_);
+        log_("[join] " + std::to_string(id) + " did not finish joining (" + reason + ")" +
+             (failures > 1 ? ", attempt " + std::to_string(failures) : std::string{}));
     }
     guests_.erase(found);
     party_left(id, name);
-    vote_cooldowns_.erase(id);
+    // Their vote cooldown stays (tick() drops it once it has run out): leaving and coming
+    // back does not let a player start another vote sooner.
     // One voter fewer, or the player a kick vote was about. Counted in tick(): a passing kick
     // vote drops another player, which must not happen inside a caller's walk over guests_.
     vote_recount_ = true;
@@ -363,10 +394,10 @@ void Host::drop(std::uint64_t id, const std::string &reason) {
 bool Host::accept_data(Guest &source, const Packet &p) {
     bool accepted{};
     if (p.kind == PacketKind::cosmetics) {
-        accepted = source.appearance.push(p);
+        accepted = source.outfit_budget.accept(now_) && source.appearance.push(p);
         if (accepted) source.cosmetic_packet = encode_wire(p);
     } else if (p.kind == PacketKind::audio)
-        accepted = source.audio.push(p, now_);
+        accepted = source.sound_budget.accept(now_, p.audio.size()) && source.audio.push(p, now_);
     else if (p.kind == PacketKind::pose)
         accepted = source.poses.push_validated(p, now_);
     // The server never plays anything back: keep only what ordering needs.
@@ -482,10 +513,8 @@ void Host::receive(std::uint64_t peer, std::span<const std::uint8_t> bytes) {
         const bool joined = !link->handshaken;
         link->member.epoch = p.epoch;
         if (joined) {
-            link->member.name = p.text.empty() ? "Player " + std::to_string(peer % 10000) : p.text;
-            if (link->member.name.size() > 128) link->member.name.resize(128);
-            // Names show in every player's roster, nametags and party UI.
-            if (text::contains_bad_words(link->member.name)) link->member.name = text::mask_bad_words(link->member.name);
+            link->member.name = player_name(p.text, peer);
+            join_backoff_.joined(peer);
         }
         link->handshaken = true;
         link->world_ready = true;
@@ -717,6 +746,10 @@ void Host::tick(std::uint64_t now) {
             continue;
         }
         auto *guest = find(link.id);
+        if (!guest && join_backoff_.waiting(link.id, now_)) {
+            transport_.disconnect(link.id, "Too many failed attempts to join. Wait a little and try again.");
+            continue;
+        }
         if (!guest) {
             if (!individual_steam_id(link.id) || guests_.size() >= config_.max_players) {
                 transport_.disconnect(link.id, "The server is full.");
@@ -765,6 +798,8 @@ void Host::tick(std::uint64_t now) {
     activity_.tick(now_);
     if (std::exchange(vote_recount_, false)) check_vote(false);
     if (vote_ && now_ >= vote_->ends) check_vote(true);
+    std::erase_if(vote_cooldowns_, [&](const auto &entry) { return now_ >= entry.second; });
+    join_backoff_.prune(now_);
 }
 
 // ---- Commands --------------------------------------------------------------------------------
@@ -838,7 +873,7 @@ std::string Host::command(std::string_view line, std::uint64_t admin) {
         if (!console && is_admin(id)) return "Admins cannot ban other admins.";
         if (is_banned(id)) return std::to_string(id) + " is already banned.";
         auto label = guest ? guest->member.name : clean_chat_text(reason);
-        if (label.size() > 64) label.resize(64);
+        cut_text(label, 64);
         config_.bans.push_back({id, label, static_cast<std::int64_t>(std::time(nullptr))});
         if (guest) drop(id, "You were banned from this server.");
         return changed((label.empty() ? std::to_string(id) : label) + " was banned.");
@@ -858,7 +893,10 @@ std::string Host::command(std::string_view line, std::uint64_t admin) {
         return text;
     }
     if (name == "map") {
-        if (argument.empty() || !valid_map_destination(map_destination(argument)))
+        // The map as it will be stored must still name a destination: one that does not would
+        // leave the server unable to tell players where to go, and unable to start again.
+        if (argument.empty() || !valid_map_destination(map_destination(argument)) ||
+            !valid_map_destination(map_destination(map_setting(argument))))
             return "No single map is called \"" + std::string(argument) + "\". Type maps for the list.";
         if (map_hash(map_destination(argument)) == map_) return "The server is already on that map.";
         change_map(argument);

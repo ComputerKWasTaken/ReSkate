@@ -9,6 +9,7 @@ namespace dingosdk::multiplayer {
 namespace {
 constexpr std::uint32_t magic = 0x31504d52; // RMP1, little endian
 constexpr std::size_t header_size = packet_header_size;
+std::size_t utf8_length(std::string_view text, std::size_t at) noexcept; // defined with the text checks below
 std::uint8_t encode_park(unsigned lot, std::string_view choice) {
     if (choice.empty() || choice == "empty") return 0;
     for (unsigned family = 0; family < park_families.size(); ++family)
@@ -180,9 +181,14 @@ bool valid_roster(std::span<const Member> members, unsigned capacity) noexcept {
         // A server is in no party; only a party's leader leads or opens it.
         if ((server && m.party) || (!m.party && (m.party_leader || m.party_open)) || (m.party_open && !m.party_leader))
             return false;
-        for (unsigned char c : m.name)
-            if (c < 32 || c == 127)
+        // Names reach the game's own UI: whole UTF-8 characters only, and no controls.
+        for (std::size_t at = 0; at < m.name.size();) {
+            const auto length = utf8_length(m.name, at);
+            const auto c = static_cast<unsigned char>(m.name[at]);
+            if (!length || c < 32 || c == 127)
                 return false;
+            at += length;
+        }
         unsigned leaders = m.party_leader ? 1U : 0U, size = 1;
         for (std::size_t j = 0; j < members.size(); ++j) {
             if (j < i && members[j].id == m.id)
@@ -251,7 +257,7 @@ bool valid_appearance(const Appearance &a) noexcept {
             size += 8 + item.asset.size() + item.parameters.size() * 4;
         }
     }
-    return size <= max_packet;
+    return size <= max_appearance_bytes;
 }
 bool valid_transform(const Transform &t) noexcept {
     for (float v : t.position)
@@ -949,6 +955,15 @@ std::string clean_chat_text(std::string_view text) {
     const auto first = result.find_first_not_of(' ');
     if (first == std::string::npos) return {};
     return result.substr(first, result.find_last_not_of(' ') - first + 1);
+}
+std::string clean_roster_name(std::string_view text) {
+    auto name = clean_chat_text(text);
+    if (name.size() > 128) {
+        std::size_t cut = 128;
+        while (cut && (static_cast<unsigned char>(name[cut]) & 0xC0) == 0x80) --cut;
+        name.resize(cut);
+    }
+    return name;
 }
 bool newer_sequence(std::uint32_t a, std::uint32_t b) noexcept {
     const auto d = a - b;

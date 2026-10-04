@@ -92,6 +92,7 @@ void stop(Session &s, std::string reason) {
     s.clear_pending = false;
     s.force_world_layers = false;
     s.banned.clear();
+    s.join_backoff = {};
     apply_host_world_layers(false, s.layers);
     s.layers = default_world_layers();
     clear_remote_network_objects();
@@ -435,6 +436,8 @@ void render(Session &s, std::uintptr_t client, const NativeFrame &local, std::ui
             p.next_audio_update = 0;
         }
     };
+    // The developer hoodie and board mark an identity: only one Steam vouches for (steam_vouched).
+    const auto developer_id = [&](const Peer &p) { return steam_vouched(s, p) ? p.member.id : std::uint64_t{}; };
     each_active_peer(s, [&](Peer &p) {
         // A dedicated server has no skater to show.
         if (!p.member.id || (dedicated_host(s) && p.member.id == s.host_id))
@@ -444,8 +447,8 @@ void render(Session &s, std::uintptr_t client, const NativeFrame &local, std::ui
         // the spectate position are still refreshed (sound events are released one per frame).
         if (was_visible && local.ready && !p.render_failed && p.far_interval && now < p.next_far_sample &&
             !(p.far_for_view && !out_of_view(p, view))) {
-            update_developer_hoodie(s.base, remote_skater_entity(), p.member.id, remote_skater_generation(), p.developer_hoodie);
-            update_developer_board(s.base, remote_board_entity(), p.member.id, remote_skater_generation(), p.developer_board);
+            update_developer_hoodie(s.base, remote_skater_entity(), developer_id(p), remote_skater_generation(), p.developer_hoodie);
+            update_developer_board(s.base, remote_board_entity(), developer_id(p), remote_skater_generation(), p.developer_board);
             present_audio(p);
             update_party_position(&p.render_pose);
             if (labels) label(p);
@@ -457,7 +460,9 @@ void render(Session &s, std::uintptr_t client, const NativeFrame &local, std::ui
                                                        : p.poses.sample_remote(now, p.render_pose);
             // Showing a player without an actor spawns one (native_skater_spawn.cpp).
             const bool spawning = sampled && p.appearance.value() && !was_visible && !remote_skater_entity();
-            if (spawning && native_pass) {
+            if (spawning && now < p.next_spawn) {
+                p.native_status = "Waiting to show the player again.";
+            } else if (spawning && native_pass) {
                 p.native_status = "Waiting for another player's skater to finish spawning.";
             } else if (sampled && p.appearance.value()) {
                 if (spawning) {
@@ -514,15 +519,17 @@ void render(Session &s, std::uintptr_t client, const NativeFrame &local, std::ui
                     remove_remote(s.base);
                 }
             } else {
-                if (was_visible)
+                if (was_visible) {
                     remove_remote(s.base);
+                    p.next_spawn = now + 3000000;
+                }
                 p.native_status =
                     sampled ? "Waiting for the player's cosmetic recipe." : "Waiting for player poses.";
             }
         }
-        update_developer_hoodie(s.base, p.visible ? remote_skater_entity() : 0, p.member.id,
+        update_developer_hoodie(s.base, p.visible ? remote_skater_entity() : 0, developer_id(p),
                                  remote_skater_generation(), p.developer_hoodie);
-        update_developer_board(s.base, p.visible ? remote_board_entity() : 0, p.member.id,
+        update_developer_board(s.base, p.visible ? remote_board_entity() : 0, developer_id(p),
                                remote_skater_generation(), p.developer_board);
         if (!p.visible) {
             stop_remote_audio();

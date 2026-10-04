@@ -1902,6 +1902,9 @@ void pump_throwdown_lab(Address vm) noexcept {
     }
     if (!l.pending.load(std::memory_order_acquire)) return;
     profile_runtime::PreserveError preserve;
+    // A relay spawn that fails here never reaches the server: the relay is told, so the copy
+    // is dropped instead of waiting for an MMID that will not come.
+    std::uint64_t spawn_token{};
     try {
         if (realm() != client_realm) return;
         Job job{};
@@ -1911,13 +1914,16 @@ void pump_throwdown_lab(Address vm) noexcept {
             job = l.jobs.front(); l.jobs.pop_front();
             if (l.jobs.empty()) l.pending.store(false, std::memory_order_release);
         }
+        spawn_token = job.token;
         const auto result = run_job(job);
+        spawn_token = 0;
         logging::log(logging::Level::info, logging::Channel::progression, "Throwdown lab: {}.", result);
     } catch (const std::exception& e) {
         logging::log(logging::Level::warning, logging::Channel::progression, "Throwdown lab: injection failed: {}", e.what());
     } catch (...) {
         logging::write(logging::Level::warning, logging::Channel::progression, "Throwdown lab: injection failed.");
     }
+    if (spawn_token) throwdown_relay_spawned(spawn_token, 0, 0);
 }
 
 void throwdown_lab_before_level_transition(unsigned next) noexcept {

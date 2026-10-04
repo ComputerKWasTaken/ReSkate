@@ -183,13 +183,13 @@ void apply_roster(Session &s, const Packet &p, std::uint64_t now) {
 bool accept_data(Peer &peer, const Packet &p, std::uint64_t now) {
     bool accepted{};
     if (p.kind == PacketKind::cosmetics) {
-        accepted = peer.appearance.push(p);
+        accepted = peer.outfit_budget.accept(now) && peer.appearance.push(p);
         if (accepted) {
             peer.cosmetic_packet = encode_wire(p);
             ++peer.cosmetic_revision;
         }
     } else if (p.kind == PacketKind::audio)
-        accepted = peer.audio.push(p, now);
+        accepted = peer.sound_budget.accept(now, p.audio.size()) && peer.audio.push(p, now);
     else if (p.kind == PacketKind::pose)
         accepted = peer.poses.push_validated(p, now);
     if (accepted) {
@@ -222,6 +222,7 @@ bool accept_data(Peer &peer, Packet &&p, std::uint64_t now) {
 }
 void networking(Session &s, const NativeFrame &local, std::uint64_t now) {
     s.network_now = now;
+    s.join_backoff.prune(now);
     trim_slots(s);
     if (world_playing(s, local)) s.local_root = local.pose.root;
     s.transport.poll();
@@ -274,6 +275,10 @@ void networking(Session &s, const NativeFrame &local, std::uint64_t now) {
             continue;
         }
         auto *p = find_peer(s, link.id);
+        if (!p && s.mode == Mode::host && s.join_backoff.waiting(link.id, now)) {
+            s.transport.disconnect(link.id, "Too many failed attempts to join. Wait a little and try again.");
+            continue;
+        }
         if (!p && s.mode == Mode::host)
             p = &reserve(s, link.id, now);
         if (!p) {
@@ -574,6 +579,7 @@ void networking(Session &s, const NativeFrame &local, std::uint64_t now) {
             link->world_ready = true;
             link->travel_since = 0;
             link->last_packet = now;
+            if (joined) s.join_backoff.joined(message.peer);
             if (s.mode == Mode::host) {
                 send_required(s, message.peer, encode_wire(packet(s, PacketKind::welcome, now)));
                 if (joined) {

@@ -37,4 +37,17 @@ inline std::string lower(std::string_view text) {
         if (c >= 'A' && c <= 'Z') c = static_cast<char>(c + 32);
     return result;
 }
+// Cuts text to at most `limit` bytes, never through a UTF-8 character.
+inline void cut_text(std::string &text, std::size_t limit) {
+    if (text.size() <= limit) return;
+    auto cut = limit;
+    while (cut && (static_cast<unsigned char>(text[cut]) & 0xC0) == 0x80) --cut;
+    text.resize(cut);
+}
+// A command as the log shows it: the log is plain text, so a new password is left out.
+inline std::string loggable(std::string_view command) {
+    const auto [verb, argument] = split(command);
+    if (lower(verb) != "password" || argument.empty() || argument == "off") return std::string(command);
+    return std::string(verb) + " <hidden>";
+}
 } // namespace dingosdk::server

@@ -88,6 +88,9 @@ struct Peer {
     // One entry per pose source relayed or sent to this recipient (at most max_players).
     std::vector<PoseDelivery> pose_delivery;
     std::uint64_t connected_at{}, last_packet{}, last_cosmetic_apply{};
+    // A skater removed for lack of poses is not spawned again before this: a spawn is a heavy
+    // native pass, and a player's poses may stop and start again and again.
+    std::uint64_t next_spawn{};
     ReceiveBudget budget;
     PoseBuffer poses;
     Pose render_pose;
@@ -106,6 +109,8 @@ struct Peer {
     std::uint32_t voice_sequence{};
     bool received_voice{};
     VoiceBudget voice_budget;
+    OutfitBudget outfit_budget;
+    SoundBudget sound_budget;
     ChatRate chat_rate;
     ChatBudget throwdown_budget, party_budget;
     // Host: how the guest's mods change trick scoring, as they reported it (Engine/Vfs/mod_scoring.h):
@@ -164,6 +169,8 @@ struct Session {
     bool force_world_layers{};
     // Players the host kicked. They cannot reconnect until the session ends.
     std::set<std::uint64_t> banned;
+    // Host: Steam IDs whose attempts to join keep failing wait longer each time (room.h).
+    JoinBackoff join_backoff;
     // Players banned for good (every session this PC hosts), from the local profile.
     std::vector<MultiplayerBan> bans;
     bool bans_loaded{};
@@ -291,6 +298,13 @@ template <class F> void each_active_peer(Session &s, F &&fn) {
 }
 // A guest whose host is a dedicated server (a Steam game server, not a player).
 inline bool dedicated_host(const Session &s) { return s.mode == Mode::join && game_server_steam_id(s.host_id); }
+// Whether Steam itself vouches for this player's identity to this PC: a host's guests and a
+// guest's host are connected directly, and so is another guest once the direct handshake is
+// done. Anyone else is known only from the host's roster, which a host can fill as it likes,
+// so what rests on who a player is (the developer and friend marks) waits for this.
+inline bool steam_vouched(const Session &s, const Peer &peer) {
+    return s.mode != Mode::join || peer.member.id == s.host_id || peer.direct_ready;
+}
 Peer *find_peer(Session &s, std::uint64_t id);
 unsigned player_count(const Session &s);
 void reset_peer(Session &s, std::size_t slot);

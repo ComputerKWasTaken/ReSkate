@@ -85,6 +85,17 @@ std::string bounded(const char *text, std::size_t size) {
     while (length < size && text[length]) ++length;
     return std::string(text, length);
 }
+// A listing's text as it is shown: whole UTF-8 characters, no control characters, at most
+// `limit` bytes.
+std::string tidy(std::string_view text, std::size_t limit) {
+    auto result = clean_chat_text(text);
+    if (result.size() > limit) {
+        auto cut = limit;
+        while (cut && (static_cast<unsigned char>(result[cut]) & 0xC0) == 0x80) --cut;
+        result.resize(cut);
+    }
+    return result;
+}
 } // namespace
 
 std::optional<MultiplayerLobby> read_server_tags(std::string_view tags, std::uint64_t steam_id) {
@@ -121,8 +132,13 @@ std::optional<MultiplayerLobby> read_server_tags(std::string_view tags, std::uin
         default: break;
         }
     }
-    if (!reskate || !version || !secret || row.capacity < 1) return {};
+    // Anyone can list a server: a row's numbers are held to what a server can have, and its
+    // text is cleaned (tidy) before it is shown or logged.
+    if (!reskate || !version || !secret || row.capacity < 1 || row.capacity > static_cast<int>(max_remote_players)) return {};
+    row.players = std::clamp(row.players, 0, row.capacity);
     row.code = format_invite({steam_id, secret});
+    row.name = tidy(row.name, 64);
+    row.map = tidy(row.map, 128);
     if (row.name.empty()) row.name = "ReSkate server";
     return row;
 }
@@ -175,8 +191,8 @@ void SteamServerBrowser::read() {
             // can lag behind a change of map.
             const bool answered = item->had_successful_response;
             if (answered) {
-                if (const auto name = bounded(item->name, sizeof item->name); !name.empty()) row->name = name;
-                if (const auto map = bounded(item->map, sizeof item->map); !map.empty()) row->map = map;
+                if (const auto name = tidy(bounded(item->name, sizeof item->name), 64); !name.empty()) row->name = name;
+                if (const auto map = tidy(bounded(item->map, sizeof item->map), 128); !map.empty()) row->map = map;
                 row->ping = item->ping;
             }
             if (answered || !entry.answered) {

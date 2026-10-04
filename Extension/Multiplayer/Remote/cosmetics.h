@@ -9,6 +9,9 @@ namespace dingosdk::multiplayer {
 inline constexpr std::uint32_t skater_recipe_key = 2759515148U, board_recipe_key = 1583459055U;
 inline constexpr std::size_t max_cosmetic_slots = 64, max_cosmetic_scalars = 64,
                              max_cosmetic_parameters = 128, max_cosmetic_asset = 255;
+// The largest encoded outfit packet. Well under the packet limit, so an outfit a host accepts
+// always fits again with the reference marker a relayed copy carries.
+inline constexpr std::size_t max_appearance_bytes = 16384;
 struct CosmeticSlot {
     std::uint32_t slot{};
     std::string asset;
