@@ -87,6 +87,7 @@ add_library(dingosdk_runtime SHARED
     Extension/Assets/morph_memory_pool.cpp
     Extension/Assets/native_render_resource_pool.cpp
     Extension/World/native_entity_pages.cpp
+    Extension/World/physics_world_size.cpp
     Extension/Rendering/display_startup.cpp
     Extension/Rendering/replay_export.cpp
     Engine/Game/World/world_model.cpp
