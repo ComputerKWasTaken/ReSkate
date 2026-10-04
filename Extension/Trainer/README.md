@@ -94,9 +94,14 @@ folder>` (CMake option `DINGOSDK_BUILD_TRAINER_TESTS`) lists the tuning values w
   those. The trainer multiplies the launch speed where the game sets the jump's trajectory (no
   comply, boneless: `trainer_jump.cpp`) or scales the skater's upward speed as the jump starts
   (hippy jump).
-- Pushing is scripted too: the game holds the skater at a speed its trick scripts pick (about 4 m/s
-  for taps, up to 9.1 m/s while push is held) and skips its own code for the push tuning values.
-  "Top pushing speed" is therefore the trainer's doing: past the game's last step the skater
-  carries on to your number, and a lower number caps every step. Auto push is the trainer's doing as well (the game's flag only reaches its animation): once rolling and not braking, the skater gains speed up to the auto push speed. Push strength has no effect in
+- Much of the game's tuning is not in `Gameplay/SkatePhysicsTuning` but in data-defined classes
+  (push speeds, everything on foot, dive and glide, bail speeds...). A live copy has no name to
+  look up, so the trainer finds it by searching writable memory for the class's defaults laid
+  out as the class lays them out (`trainer_classes.cpp`; the table in `trainer_classes.inc` is
+  generated from the game's own data). The search runs on its own thread a few seconds after a
+  level loads; `trainer classes` says what it found. Native code keeps its own copy of the push
+  speeds, found and written the same way.
+- "Push speed" scales the push class's speeds (a tapped push, a held one, the top) and the
+  tuning's top pushing speed, which only gates whether a push may start. Auto push is the trainer's doing as well (the game's flag only reaches its animation): once rolling and not braking, the skater gains speed up to the auto push speed. Push strength has no effect in
   this game build and is hidden.
 - Built for one game build (the one ReSkate 1.0.3 supports). A game update needs a new build.

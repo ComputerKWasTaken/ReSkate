@@ -16,7 +16,8 @@ namespace {
 struct Page {
     int tab{1}; // opens on PRESETS: the quick switches
     std::array<char, 96> search{};
-    int group{}; // 0: the Essentials list, 1: every group, 2..: one of the view's groups
+    int mode{1}; // the Tune tab: 0 Realistic, 1 Fun (two short lists), 2 Everything
+    int group{1}; // Everything: 1: every group, 2..: one of the view's groups
     bool only_changed{}, graph_points{}, show_unused{};
     std::size_t hidden_unused{}; // rows the filters would show but for "no use found"
     // The rows the filters leave, rebuilt when the snapshot or a filter changes.
@@ -29,8 +30,8 @@ struct Page {
     std::array<char, 49> preset_name{};
     std::array<float, 3> teleport{};
     double speed_edit{-1}, speed_until{};
-    float hippy_edit{1}, nocomply_edit{1}, boneless_edit{1};
-    bool hippy_editing{}, nocomply_editing{}, boneless_editing{};
+    float hippy_edit{1}, nocomply_edit{1}, boneless_edit{1}, offboard_edit{1};
+    bool hippy_editing{}, nocomply_editing{}, boneless_editing{}, offboard_editing{};
     std::uint64_t open_serial{}; // the last `trainer open` acted on
     bool show_page{};
 };
@@ -61,25 +62,26 @@ void trainer_command(SkateMenu &menu, const CallbacksV3 &callbacks, const std::s
 
 void filter_rows(Page &p, const trainer::View &view) {
     const auto words = lower(p.search.data());
-    const auto key = std::format("{}|{}|{}|{}|{}", words, p.group, p.only_changed, p.graph_points, p.show_unused);
+    const auto key = std::format("{}|{}|{}|{}|{}|{}", words, p.group, p.only_changed, p.graph_points, p.show_unused, p.mode);
     if (p.shown_revision == view.revision && p.shown_key == key) return;
     p.shown_revision = view.revision;
     p.shown_key = key;
     p.shown.clear();
     p.hidden_unused = 0;
-    const std::string *group = p.group > 1 && static_cast<std::size_t>(p.group) <= view.groups.size() + 1
+    const std::string *group = p.mode == 2 && p.group > 1 && static_cast<std::size_t>(p.group) <= view.groups.size() + 1
         ? &view.groups[static_cast<std::size_t>(p.group) - 2] : nullptr;
-    const bool essentials = p.group == 0 && words.empty() && !p.only_changed;
+    const bool essentials = p.mode < 2;
+    const std::uint8_t list = p.mode == 0 ? trainer::mode_realistic : trainer::mode_fun;
     for (std::size_t i = 0; i < view.rows.size(); ++i) {
         const auto &row = view.rows[i];
         if (essentials) {
-            if (!row.friendly.empty()) p.shown.push_back(i);
+            if (!row.friendly.empty() && (row.modes & list)) p.shown.push_back(i);
             continue;
         }
         if (row.detail && !p.graph_points && !row.touched) continue;
         if (p.only_changed && !row.touched && !row.frozen) continue;
         // Searching looks through every group.
-        if (words.empty() ? (group && row.group != *group) : !contains_words(lower(row.id + " " + row.label + " " + row.friendly), words))
+        if (words.empty() || p.mode < 2 ? (group && row.group != *group) : !contains_words(lower(row.id + " " + row.label + " " + row.friendly), words))
             continue;
         // A value nothing in the game reads would be a slider that does nothing.
         if (!row.used && !p.show_unused && !row.touched && !row.frozen) {
@@ -153,40 +155,90 @@ void tune_tab(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const trai
         return;
     }
     if (!view.editable) warn(view.blocked.c_str());
-    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.42f);
-    ImGui::InputTextWithHint("##search", "Search every value...", p.search.data(), p.search.size());
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.42f);
-    const char *current = p.group == 0 ? "Essentials" : p.group > 1 && static_cast<std::size_t>(p.group) <= view.groups.size() + 1
-        ? view.groups[static_cast<std::size_t>(p.group) - 2].c_str() : "Every group";
-    if (ImGui::BeginCombo("##group", current)) {
-        if (ImGui::Selectable("Essentials", p.group == 0)) p.group = 0;
-        if (ImGui::Selectable("Every group", p.group == 1)) p.group = 1;
-        for (std::size_t i = 0; i < view.groups.size(); ++i)
-            if (ImGui::Selectable(view.groups[i].c_str(), p.group == static_cast<int>(i) + 2)) p.group = static_cast<int>(i) + 2;
-        ImGui::EndCombo();
+    // Two short lists and the whole table.
+    {
+        static constexpr const char *modes[]{"REALISTIC", "FUN", "EVERYTHING"};
+        const float width = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 2) / 3;
+        for (int i = 0; i < 3; ++i) {
+            if (i) ImGui::SameLine();
+            const bool on = p.mode == i;
+            if (on) ImGui::PushStyleColor(ImGuiCol_Button, skate_theme::blue);
+            if (ImGui::Button(modes[i], ImVec2(width, 0))) p.mode = i;
+            if (on) ImGui::PopStyleColor();
+        }
     }
-    ImGui::SameLine();
-    ImGui::BeginDisabled(!view.touched || !view.editable);
-    if (ImGui::Button("Reset all")) trainer_command(menu, callbacks, "reset all");
+    const auto preset_on = [&](std::string_view name) {
+        for (const auto &preset : view.presets)
+            if (preset.name == name) return preset.active;
+        return false;
+    };
+    const auto preset_button = [&](const char *name) {
+        const bool on = preset_on(name);
+        if (on) ImGui::PushStyleColor(ImGuiCol_Button, skate_theme::blue);
+        if (ImGui::Button(name)) trainer_command(menu, callbacks, std::string(on ? "preset remove " : "preset apply ") + name);
+        if (on) ImGui::PopStyleColor();
+    };
+    ImGui::BeginDisabled(!view.editable || !callbacks.queue_console_command);
+    if (p.mode == 0) {
+        note("Tone the game down: lower pop, slower pushing and rotation, stricter catches and bails. Drag any value below the game's own.");
+        preset_button("Realistic");
+        ImGui::SameLine();
+        if (ImGui::Button("Reset all")) trainer_command(menu, callbacks, "reset all");
+        ImGui::SameLine();
+        ImGui::TextDisabled("%zu changed", view.touched);
+    } else if (p.mode == 1) {
+        note("Turn it up: huge pop, fast pushing, flips, spins, and everything on foot and in the air.");
+        static constexpr const char *fun[]{"Super Ollie", "Fast", "Fast Flips", "Fast Spins", "Auto Push", "Moon Jump", "Fast On Foot",
+                                           "Fast Parkour Flips", "Super Glide", "Torpedo Boost"};
+        for (std::size_t i = 0; i < std::size(fun); ++i) {
+            if (i && ImGui::GetItemRectMax().x + ImGui::CalcTextSize(fun[i]).x + ImGui::GetStyle().FramePadding.x * 4 <
+                         ImGui::GetWindowPos().x + ImGui::GetContentRegionMax().x)
+                ImGui::SameLine();
+            preset_button(fun[i]);
+        }
+        if (ImGui::Button("Reset all")) trainer_command(menu, callbacks, "reset all");
+        ImGui::SameLine();
+        ImGui::TextDisabled("%zu changed", view.touched);
+    }
     ImGui::EndDisabled();
-    note("Changes apply as you drag. The box on the left only locks a value against presets and Reset all.");
-    ImGui::Checkbox("Only what I changed", &p.only_changed);
-    ImGui::SameLine();
-    ImGui::Checkbox("Graph points", &p.graph_points);
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Show every point of the tuning graphs, not just one multiplier per graph.");
-    ImGui::SameLine();
-    ImGui::Checkbox("Values with no use found", &p.show_unused);
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Also list the tuning values that no game code was found reading.\nChanging those will probably do nothing.");
+    if (p.mode == 2) {
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.42f);
+        ImGui::InputTextWithHint("##search", "Search every value...", p.search.data(), p.search.size());
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.42f);
+        if (p.group < 1) p.group = 1;
+        const char *current = p.group > 1 && static_cast<std::size_t>(p.group) <= view.groups.size() + 1
+            ? view.groups[static_cast<std::size_t>(p.group) - 2].c_str() : "Every group";
+        if (ImGui::BeginCombo("##group", current)) {
+            if (ImGui::Selectable("Every group", p.group == 1)) p.group = 1;
+            for (std::size_t i = 0; i < view.groups.size(); ++i)
+                if (ImGui::Selectable(view.groups[i].c_str(), p.group == static_cast<int>(i) + 2)) p.group = static_cast<int>(i) + 2;
+            ImGui::EndCombo();
+        }
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!view.touched || !view.editable);
+        if (ImGui::Button("Reset all")) trainer_command(menu, callbacks, "reset all");
+        ImGui::EndDisabled();
+        note("Changes apply as you drag. The box on the left only locks a value against presets and Reset all.");
+        ImGui::Checkbox("Only what I changed", &p.only_changed);
+        ImGui::SameLine();
+        ImGui::Checkbox("Graph points", &p.graph_points);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Show every point of the tuning graphs, not just one multiplier per graph.");
+        ImGui::SameLine();
+        ImGui::Checkbox("Values with no use found", &p.show_unused);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Also list the tuning values that no game code was found reading.\nChanging those will probably do nothing.");
+    }
     filter_rows(p, view);
-    ImGui::SameLine();
-    if (p.hidden_unused) ImGui::TextDisabled("%zu shown, %zu changed, %zu hidden", p.shown.size(), view.touched, p.hidden_unused);
-    else ImGui::TextDisabled("%zu shown, %zu changed", p.shown.size(), view.touched);
-    // These trick heights are not tuning values; they sit with the Essentials.
-    if (p.group == 0 && p.search[0] == 0 && !p.only_changed) trick_heights(menu, callbacks, p, view);
-    const bool with_group = p.search[0] != 0 || p.group <= 1 || p.only_changed;
-    const bool friendly = p.group == 0 && p.search[0] == 0 && !p.only_changed;
+    if (p.mode == 2) {
+        ImGui::SameLine();
+        if (p.hidden_unused) ImGui::TextDisabled("%zu shown, %zu changed, %zu hidden", p.shown.size(), view.touched, p.hidden_unused);
+        else ImGui::TextDisabled("%zu shown, %zu changed", p.shown.size(), view.touched);
+    }
+    // The trick heights are not tuning values; they sit with the short lists.
+    if (p.mode < 2) trick_heights(menu, callbacks, p, view);
+    const bool with_group = p.mode == 2 && (p.search[0] != 0 || p.group <= 1 || p.only_changed);
+    const bool friendly = p.mode < 2;
     ImGui::BeginChild("tune-rows", ImVec2(0, 0), ImGuiChildFlags_None);
     ImGuiListClipper clipper;
     clipper.Begin(static_cast<int>(p.shown.size()));
@@ -203,7 +255,7 @@ void trick_heights(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const
         field(menu, label);
         ImGui::PushID(option);
         float shown = editing ? edit : value;
-        if (ImGui::SliderFloat("##height", &shown, 0.5f, 10.0f, "x %.2f", ImGuiSliderFlags_AlwaysClamp)) {
+        if (ImGui::SliderFloat("##height", &shown, 0.1f, 50.0f, "x %.2f", ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_Logarithmic)) {
             edit = shown;
             editing = true;
         }
@@ -214,7 +266,8 @@ void trick_heights(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const
     slider("No comply height", "nocomply_height", view.nocomply_height, p.nocomply_edit, p.nocomply_editing);
     slider("Boneless height", "boneless_height", view.boneless_height, p.boneless_edit, p.boneless_editing);
     slider("Hippy jump height", "hippy_height", view.hippy_height, p.hippy_edit, p.hippy_editing);
-    note("Separate from ollie height because the game sets these in its trick scripts.");
+    slider("Off-board jump height", "offboard_height", view.offboard_height, p.offboard_edit, p.offboard_editing);
+    note("Separate from ollie height because the game sets these in its trick scripts. Ctrl+click a slider to type a number.");
     end_card();
 }
 void presets_tab(SkateMenu &menu, const Model &model, const CallbacksV3 &callbacks, Page &p, const trainer::View &view) {
@@ -459,7 +512,8 @@ bool trainer_take_open() {
     auto &p = page();
     if (view->open_serial == p.open_serial) return false;
     p.open_serial = view->open_serial;
-    p.tab = std::clamp(view->open_tab, 0, 3);
+    p.tab = view->open_tab >= 4 ? 0 : std::clamp(view->open_tab, 0, 3);
+    if (view->open_tab >= 4) p.mode = std::clamp(view->open_tab - 4, 0, 2);
     p.show_page = true;
     return true;
 }

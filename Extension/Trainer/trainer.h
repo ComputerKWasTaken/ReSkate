@@ -15,6 +15,8 @@ namespace dingosdk::trainer {
 // curve: a FloatCurve the asset points at; graph: a table of points stored in the asset
 // itself (X0..X15, Y0..Y15). Both are edited as one multiplier on their outputs.
 enum class Kind : std::uint8_t { real, integer, flag, curve, graph };
+// The Tune tab's two short lists: which of them a value is on (Row::modes).
+inline constexpr std::uint8_t mode_realistic = 1, mode_fun = 2;
 
 // One editable value of Gameplay/SkatePhysicsTuning. `id` is the name the game's data gives
 // it ("PhysicsMode.JumpMaxHeight").
@@ -26,6 +28,7 @@ struct Row {
     bool detail{}; // a single point or bound of a graph: hidden unless asked for
     std::string friendly; // a plain name, for the handful of values on the Essentials list
     int rank{};           // its place on that list, from 1; 0: not on it
+    std::uint8_t modes{}; // which short lists it is on (trainer_presets.h: mode_realistic, mode_fun)
     bool used{};          // the game's code was found to read it
 };
 struct PresetRow {
@@ -64,6 +67,7 @@ struct View {
     float hippy_height{1};
     // The same for the no comply and the boneless.
     float nocomply_height{1}, boneless_height{1};
+    float offboard_height{1}; // a jump on foot
     // HUD
     bool hud{}, hud_jump{true}, logging{};
     // The loaded map and what its author ships for the trainer (Mods/<mod>/trainer.json).

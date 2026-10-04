@@ -1,4 +1,5 @@
 #include "trainer.h"
+#include "trainer_classes.h"
 #include "trainer_jump.h"
 #include "trainer_presets.h"
 #include "Engine/Core/Json/json.h"
@@ -32,6 +33,7 @@ namespace {
 namespace tuning = dingosdk::physics_tuning;
 using Vec3 = std::array<float, 3>;
 constexpr float max_coordinate = 1.0e6f;
+constexpr float height_low = 0.05f, height_high = 100.0f; // trick height multipliers
 constexpr std::uint32_t air_states_first = 200, air_states_end = 300;
 constexpr std::uint32_t xinput_up = 0x1, xinput_down = 0x2, xinput_left = 0x4, xinput_right = 0x8,
                         xinput_lb = 0x100, xinput_rb = 0x200;
@@ -47,6 +49,7 @@ struct Entry {
     bool used{}; // the game's code was found to read it (trainer_used.inc), or it is linked
     std::vector<std::size_t> drives; // graph multipliers this value scales (value_links)
     std::vector<std::size_t> members; // graph: its outputs (Y0.., Min_Y, Max_Y)
+    int class_field{-1};              // a field of one of the game's data-defined classes (trainer_classes.h), not of the tuning asset
 };
 struct MapData {
     std::array<Marker, marker_slots> markers{};
@@ -106,13 +109,21 @@ struct State {
     // The hippy jump's height is set by the game's trick scripts, not by tuning: the trainer
     // scales the upward velocity when it sees one start.
     float hippy_height{1};
+    // An on-foot jump: the same scaling, when a skater standing off the board starts to rise.
+    float offboard_height{1};
+    bool offboard_grounded{}; // off the board and not moving up or down at the last tick
+    const char *boost_name{""};
     // The no comply and the boneless are launched by the trick scripts too (trainer_jump.cpp).
     float nocomply_height{1}, boneless_height{1};
     std::uint32_t last_state{};
-    float boost_factor{}; // velocity factor of the hippy jump now starting, 0: none
+    float boost_factor{}; // velocity factor of the jump now starting, 0: none
     std::uint64_t boost_until{};
     float return_delay{1.5f};
     std::uint64_t seen_wipeouts{}, return_at{}, open_serial{};
+    std::uint64_t class_search_at{}; // when to look for the game's tuning classes (0: not due)
+    int class_search_tries{};
+    bool classes_stock{}; // a session's host tuning is in force: the classes hold their defaults
+    bool wipeouts_known{}; // the wipeout count the session started with was read
     int open_tab{};
     std::uint32_t pad_previous{};
     Motion motion;
@@ -208,9 +219,10 @@ void load_store() {
             s.hud = o.value("hud", false);
             s.hud_jump = o.value("hud_jump", true);
             s.return_delay = std::clamp(o.value("return_delay", 1.5f), 0.0f, 10.0f);
-            s.hippy_height = std::clamp(o.value("hippy_height", 1.0f), 0.25f, 20.0f);
-            s.nocomply_height = std::clamp(o.value("nocomply_height", 1.0f), 0.25f, 20.0f);
-            s.boneless_height = std::clamp(o.value("boneless_height", 1.0f), 0.25f, 20.0f);
+            s.hippy_height = std::clamp(o.value("hippy_height", 1.0f), height_low, height_high);
+            s.nocomply_height = std::clamp(o.value("nocomply_height", 1.0f), height_low, height_high);
+            s.offboard_height = std::clamp(o.value("offboard_height", 1.0f), height_low, height_high);
+            s.boneless_height = std::clamp(o.value("boneless_height", 1.0f), height_low, height_high);
             s.slot = std::clamp(o.value("slot", 0), 0, static_cast<int>(marker_slots) - 1);
         }
         if (json->contains("values") && json->at("values").is_object())
@@ -254,6 +266,7 @@ void save_store() {
         options["return_delay"] = s.return_delay;
         options["hippy_height"] = s.hippy_height;
         options["nocomply_height"] = s.nocomply_height;
+        options["offboard_height"] = s.offboard_height;
         options["boneless_height"] = s.boneless_height;
         options["slot"] = s.slot;
         json["options"] = std::move(options);
@@ -367,6 +380,10 @@ double sane(const Entry &e, double value) {
 }
 void apply_entry(Entry &e) {
     auto &s = state();
+    if (e.class_field >= 0) {
+        want_class_value(static_cast<std::size_t>(e.class_field), static_cast<float>(e.touched ? e.value : e.stock));
+        return;
+    }
     if (e.kind == Kind::graph) {
         // A point the player set by hand keeps their value.
         for (const auto index : e.members) {
@@ -398,7 +415,11 @@ void set_entry(Entry &e, double value) {
         const auto targets = e.drives; // set_entry may not touch `e` again, but keep the list stable
         auto &s = state();
         for (const auto index : targets)
-            if (index < s.entries.size() && !s.entries[index].frozen) set_entry(s.entries[index], ratio);
+            if (index < s.entries.size() && !s.entries[index].frozen) {
+                auto &target = s.entries[index];
+                const bool multiplier = target.kind == Kind::curve || target.kind == Kind::graph;
+                set_entry(target, multiplier ? ratio : target.stock * ratio);
+            }
     }
 }
 Entry *find_entry(std::string_view id) {
@@ -465,6 +486,23 @@ void build_entries() {
         add(parent, Kind::graph, offset, 0, 0);
         s.entries.back().members = std::move(outputs);
     }
+    // The game's data-defined classes: one row per number field, under the class's name.
+    for (std::size_t c = 0; c < class_count; ++c)
+        for (std::size_t i = 0; i < class_specs[c].count; ++i) {
+            const auto &field = class_fields[class_specs[c].first + i];
+            Entry e;
+            e.id = std::format("{}.{}", class_specs[c].key, field.name);
+            e.key = lower(e.id);
+            if (s.index.contains(e.key)) continue;
+            e.group = class_specs[c].group;
+            e.label = spaced(field.name);
+            e.kind = Kind::real;
+            e.used = true;
+            e.class_field = static_cast<int>(class_specs[c].first + i);
+            e.stock = e.value = field.stock;
+            s.index.emplace(e.key, s.entries.size());
+            s.entries.push_back(std::move(e));
+        }
     for (const auto &link : value_links()) {
         const auto from = s.index.find(link.value), to = s.index.find(link.drives);
         if (from == s.index.end() || to == s.index.end()) continue;
@@ -479,7 +517,7 @@ void adopt(const tuning::Values &live) {
     s.own = live;
     s.want = live;
     for (auto &e : s.entries) {
-        e.stock = e.kind == Kind::curve || e.kind == Kind::graph ? 1.0 : read_field(s.own.image, e);
+        e.stock = e.class_field >= 0 ? class_fields[e.class_field].stock : e.kind == Kind::curve || e.kind == Kind::graph ? 1.0 : read_field(s.own.image, e);
         const auto found = s.saved.find(e.key);
         if (found != s.saved.end()) {
             e.frozen = found->second.frozen;
@@ -497,7 +535,8 @@ void adopt(const tuning::Values &live) {
         for (const auto index : e.drives) {
             auto &target = s.entries[index];
             if (target.touched || target.frozen) continue;
-            target.value = sane(target, e.value / e.stock);
+            const bool multiplier = target.kind == Kind::curve || target.kind == Kind::graph;
+            target.value = sane(target, multiplier ? e.value / e.stock : target.stock * e.value / e.stock);
             target.touched = target.value != target.stock;
             if (target.touched) {
                 apply_entry(target);
@@ -739,6 +778,9 @@ void enter_map(const std::string &level) {
     s.telemetry.top_speed = 0;
     s.return_at = 0;
     s.profile_due = false;
+    // A level brings fresh copies of the game's tuning classes: look for them once it has settled.
+    s.class_search_at = level.empty() ? 0 : GetTickCount64() + 10000;
+    s.class_search_tries = 0;
     if (!level.empty()) {
         const auto found = s.maps.find(level);
         s.profile_due = found != s.maps.end() && !found->second.preset.empty();
@@ -849,13 +891,14 @@ void observe(std::uintptr_t base, std::uintptr_t client, std::uint64_t now) {
         if (watch.state == addr::no_bail::offboard_physics_state && s.last_state == 100 && s.hippy_height != 1.0f) {
             s.boost_factor = std::sqrt(s.hippy_height); // height goes with the square of the speed
             s.boost_until = now + 250;
+            s.boost_name = "hippy jump";
         }
         s.last_state = watch.state;
     }
     if (s.boost_factor > 0) {
         const auto result = take_jump_scale_result();
         if (result.outcome > 0) {
-            say(logging::Level::info, std::format("Trainer: hippy jump boosted: up speed {:.2f} -> {:.2f} m/s.", result.up_speed,
+            say(logging::Level::info, std::format("Trainer: {} boosted: up speed {:.2f} -> {:.2f} m/s.", s.boost_name, result.up_speed,
                                                   result.up_speed * s.boost_factor));
             s.boost_factor = 0;
         } else if (now >= s.boost_until || result.outcome == -2) {
@@ -880,6 +923,18 @@ void observe(std::uintptr_t base, std::uintptr_t client, std::uint64_t now) {
     const auto dt = static_cast<float>(seconds);
     const Vec3 raw{step[0] / dt, step[1] / dt, step[2] / dt};
     const Vec3 velocity{m.velocity[0] * 0.5f + raw[0] * 0.5f, m.velocity[1] * 0.5f + raw[1] * 0.5f, m.velocity[2] * 0.5f + raw[2] * 0.5f};
+    // An on-foot jump: off the board, level at the last tick and now rising faster than stairs
+    // or a slope can lift a runner.
+    if (watch.valid && watch.state == addr::no_bail::offboard_physics_state) {
+        if (s.offboard_grounded && raw[1] > 2.2f && s.boost_factor == 0 && s.offboard_height != 1.0f) {
+            s.boost_factor = std::sqrt(s.offboard_height);
+            s.boost_until = now + 250;
+            s.boost_name = "off-board jump";
+        }
+        s.offboard_grounded = std::abs(raw[1]) < 0.6f;
+    } else {
+        s.offboard_grounded = false;
+    }
     // The skater's physics says when it is in the air: its states 200-299 are the pop and
     // the flight (100s ride the ground, 300 is a wipeout, 500s are off the board).
     const bool flying = watch.valid && watch.state >= air_states_first && watch.state < air_states_end;
@@ -929,9 +984,14 @@ void observe(std::uintptr_t base, std::uintptr_t client, std::uint64_t now) {
                              position[1], position[2], t.speed, t.vertical, t.heading, t.airborne ? 1 : 0, t.physics_state);
     }
     // A bail: back to the selected marker once the skater has had time to fall.
-    if (watch.valid && watch.wipeouts != s.seen_wipeouts) {
-        if (s.seen_wipeouts && s.auto_return && current_map().markers[static_cast<std::size_t>(s.slot)].set)
-            s.return_at = now + static_cast<std::uint64_t>(s.return_delay * 1000.0f);
+    if (watch.valid && (!s.wipeouts_known || watch.wipeouts != s.seen_wipeouts)) {
+        if (s.wipeouts_known && s.auto_return) {
+            const bool marked = current_map().markers[static_cast<std::size_t>(s.slot)].set;
+            if (marked) s.return_at = now + static_cast<std::uint64_t>(s.return_delay * 1000.0f);
+            say(logging::Level::info, marked ? std::format("Trainer: bail seen; back to marker {} in {:.1f} s.", s.slot + 1, s.return_delay)
+                                             : std::format("Trainer: bail seen, but marker {} is empty.", s.slot + 1));
+        }
+        s.wipeouts_known = true;
         s.seen_wipeouts = watch.wipeouts;
     }
 }
@@ -1074,8 +1134,9 @@ void build_view() {
     next->rows.reserve(s.entries.size());
     for (const auto &e : s.entries) {
         int rank{};
-        const auto friendly = essential_name(e.key, &rank);
-        next->rows.push_back({e.id, e.label, e.group, e.kind, e.value, e.stock, e.touched, e.frozen, e.detail, std::string(friendly), rank,
+        std::uint8_t modes{};
+        const auto friendly = essential_name(e.key, &rank, &modes);
+        next->rows.push_back({e.id, e.label, e.group, e.kind, e.value, e.stock, e.touched, e.frozen, e.detail, std::string(friendly), rank, modes,
                               e.used});
         if (e.touched) ++next->touched;
         if (std::ranges::find(next->groups, e.group) == next->groups.end()) next->groups.push_back(e.group);
@@ -1089,6 +1150,7 @@ void build_view() {
     next->auto_return = s.auto_return;
     next->hippy_height = s.hippy_height;
     next->nocomply_height = s.nocomply_height;
+    next->offboard_height = s.offboard_height;
     next->boneless_height = s.boneless_height;
     next->return_delay = s.return_delay;
     next->pad_shortcuts = s.pad_shortcuts;
@@ -1143,21 +1205,28 @@ void tick(std::uintptr_t base, std::uintptr_t client, bool playing, const std::s
             s.entity = 0;
         }
         (void)start_trick_heights(base);
+        if (s.class_search_at && now >= s.class_search_at && playing && s.telemetry.skater && !finding_classes()) {
+            // Until the push class turns up: the skater's own classes arrive a little after it does.
+            const bool have = class_searches() && class_copies(0) != 0;
+            s.class_search_at = have || ++s.class_search_tries > 6 ? 0 : now + 15000;
+            if (!have) find_classes();
+        }
+        if (const bool stock = !editable(); stock != s.classes_stock) {
+            s.classes_stock = stock;
+            for (auto &e : s.entries)
+                if (e.class_field >= 0) want_class_value(static_cast<std::size_t>(e.class_field), static_cast<float>(e.touched && !stock ? e.value : e.stock));
+        }
+        (void)apply_classes();
         // Like the hippy jump's, these are boosts: a session that turns boosts off turns them off.
         const bool boosts = !multiplayer_session_active() || session_boosts_allowed();
         set_trick_heights(boosts ? s.nocomply_height : 1.0f, boosts ? s.boneless_height : 1.0f);
-        // Pushing aims for speeds the trick scripts set and the game's code for its push tuning
-        // is skipped: the top pushing speed is kept as the player's number and handed over as
-        // a multiple of the stock one.
-        const auto ratio = [&](std::string_view id) {
-            const auto *e = find_entry(id);
-            return e && e->touched && e->stock > 0 && editable() ? static_cast<float>(e->value / e->stock) : 1.0f;
-        };
+        // The speeds pushes aim for are the push class's (value_links ties them to the tuning's top
+        // pushing speed, which only gates whether a push may start).
         const auto *top_speed = find_entry("physicspush.maxpushablespeed");
         // Auto push is the trainer's doing as well: the game's flag reaches only its animation.
         const auto *auto_push = find_entry("physicsmode.autopushenabled"), *auto_speed = find_entry("physicspush.maxspeedforautopush");
         const bool cruising = boosts && editable() && auto_push && auto_speed && auto_push->touched && auto_push->value != 0;
-        set_push_top(client, s.entity, boosts ? ratio("physicspush.maxpushablespeed") : 1.0f, top_speed ? static_cast<float>(top_speed->stock) : 0.0f,
+        set_push_speed(client, s.entity, 1.0f, top_speed ? static_cast<float>(top_speed->stock) : 0.0f,
                      cruising ? static_cast<float>(auto_speed->value) : 0.0f);
         for (TrickLaunch launch; take_trick_launch(launch);)
             say(logging::Level::info, std::format("Trainer trick: {} launched at {:.2f} m/s up, x{:.2f}.",
@@ -1293,11 +1362,11 @@ std::string run(std::string_view verb, const std::vector<std::string> &a) {
     if (v == "option") {
         const auto name = lower(arg(0));
         bool on{};
-        if (name == "hippy_height" || name == "nocomply_height" || name == "boneless_height") {
+        if (name == "hippy_height" || name == "nocomply_height" || name == "boneless_height" || name == "offboard_height") {
             const auto value = number(arg(1));
             if (!value) return "error: " + name + " needs a multiplier, 1 = the game's own height.";
-            (name == "hippy_height" ? s.hippy_height : name == "nocomply_height" ? s.nocomply_height : s.boneless_height) =
-                std::clamp(static_cast<float>(*value), 0.25f, 20.0f);
+            (name == "hippy_height" ? s.hippy_height : name == "nocomply_height" ? s.nocomply_height : name == "offboard_height" ? s.offboard_height : s.boneless_height) =
+                std::clamp(static_cast<float>(*value), height_low, height_high);
         } else if (name == "return_delay") {
             const auto value = number(arg(1));
             if (!value) return "error: return_delay needs seconds.";
@@ -1332,9 +1401,10 @@ std::string run(std::string_view verb, const std::vector<std::string> &a) {
     }
     if (v == "open") {
         const auto tab = lower(arg(0));
-        const std::array<std::string_view, 4> tabs{"tune", "presets", "practice", "map"};
+        // The last three are the Tune tab on one of its lists.
+        const std::array<std::string_view, 7> tabs{"tune", "presets", "practice", "map", "realistic", "fun", "everything"};
         const auto found = std::ranges::find(tabs, tab);
-        if (!tab.empty() && found == tabs.end()) return "error: usage: trainer open [tune|presets|practice|map]";
+        if (!tab.empty() && found == tabs.end()) return "error: usage: trainer open [tune|presets|practice|map|realistic|fun|everything]";
         s.open_tab = tab.empty() ? 1 : static_cast<int>(found - tabs.begin());
         ++s.open_serial;
         s.view_due = true;
@@ -1351,6 +1421,13 @@ std::string run(std::string_view verb, const std::vector<std::string> &a) {
         const auto &p = s.telemetry.position;
         return std::format("({:.2f}, {:.2f}, {:.2f}) heading {:.0f}, {:.1f} km/h. Blender: ({:.2f}, {:.2f}, {:.2f})", p[0], p[1], p[2],
                            s.telemetry.heading, s.telemetry.speed * 3.6f, p[0], -p[2], p[1]);
+    }
+    if (v == "classes") {
+        if (lower(arg(0)) == "find") {
+            find_classes();
+            return "Looking for the game's tuning classes.";
+        }
+        return "Copies found: " + classes_summary();
     }
     if (v == "refresh") return tuning::refresh_skater(s.base, s.entity) ? "Skater copy refreshed." : "error: the skater has no cached copy right now.";
     if (v == "states") {

@@ -9,7 +9,9 @@
 #include <iostream>
 #include <optional>
 #include <stdexcept>
+#include <memory>
 #include <string>
+#include <variant>
 #include <vector>
 
 namespace ebx = dingosdk::frostbite::ebx;
@@ -71,6 +73,38 @@ void walk(const ebx::Document &document, const ebx::TypeDescriptor &type, std::s
         std::cout << '\n';
     }
 }
+void tree(const ebx::Value &value, int depth, const std::string &indent);
+void tree(const ebx::Object &object, int depth, const std::string &indent) {
+    for (const auto &field : object.fields) {
+        std::cout << indent << (field.name.empty() ? "?" : field.name) << " = ";
+        tree(field.value, depth, indent);
+    }
+}
+void tree(const ebx::Value &value, int depth, const std::string &indent) {
+    if (depth > 12) { std::cout << "...\n"; return; }
+    if (const auto *b = std::get_if<bool>(&value.data)) std::cout << (*b ? "true" : "false") << '\n';
+    else if (const auto *i = std::get_if<std::int64_t>(&value.data)) std::cout << *i << '\n';
+    else if (const auto *u = std::get_if<std::uint64_t>(&value.data)) std::cout << *u << '\n';
+    else if (const auto *d = std::get_if<double>(&value.data)) std::cout << *d << '\n';
+    else if (const auto *s = std::get_if<std::string>(&value.data)) std::cout << '"' << *s << "\"\n";
+    else if (const auto *r = std::get_if<ebx::PointerReference>(&value.data))
+        std::cout << (r->kind == ebx::PointerKind::null ? "null" : r->kind == ebx::PointerKind::internal ? "-> instance " : "-> import ") << r->index << '\n';
+    else if (const auto *x = std::get_if<ebx::BoxedReference>(&value.data)) std::cout << "boxed type 0x" << std::hex << x->encodedType << std::dec << " at " << x->dataOffset << '\n';
+    else if (const auto *y = std::get_if<ebx::TypeReference>(&value.data)) std::cout << "type " << y->descriptor << " 0x" << std::hex << y->encoded << std::dec << '\n';
+    else if (const auto *o = std::get_if<std::shared_ptr<ebx::Object>>(&value.data)) {
+        std::cout << "{\n";
+        if (*o) tree(**o, depth + 1, indent + "  ");
+        std::cout << indent << "}\n";
+    } else if (const auto *a = std::get_if<ebx::Value::Array>(&value.data)) {
+        std::cout << "[" << a->size() << "]\n";
+        std::size_t shown{};
+        for (const auto &element : *a) {
+            if (++shown > 40) { std::cout << indent << "  ...\n"; break; }
+            std::cout << indent << "  - ";
+            tree(element, depth + 1, indent + "    ");
+        }
+    } else std::cout << "(other)\n";
+}
 } // namespace
 
 int main(int argc, char **argv) {
@@ -102,6 +136,42 @@ int main(int argc, char **argv) {
                     const float size = value < 0 ? -value : value;
                     if (size > 0.0009f && size < 100000.0f) std::cout << "0x" << std::hex << at << std::dec << "\t" << value << "\n";
                 }
+                return 0;
+            }
+            return 1;
+        }
+        if (mode == "--tree" && argc >= 4) {
+            const auto wanted = lower(argv[3]);
+            for (std::size_t i = 0; i < bundle.manifest.ebx.size(); ++i) {
+                if (lower(bundle.manifest.ebx[i].name) != wanted) continue;
+                const auto *payload = bundle.payload(dingosdk::frostbite::AssetKind::ebx, i);
+                if (!payload) break;
+                const auto bytes = data.read(*payload);
+                const auto document = ebx::read_document(bytes);
+                std::size_t number{};
+                for (const auto &instance : document.instances) {
+                    const auto type = instance.descriptor >= 0 && static_cast<std::size_t>(instance.descriptor) < document.types.size()
+                        ? document.types[static_cast<std::size_t>(instance.descriptor)].name : std::string("?");
+                    std::cout << "# instance " << number++ << " " << type << "\n";
+                    if (instance.object) tree(*instance.object, 0, "  ");
+                }
+                number = 0;
+                for (const auto &boxed : document.boxedValues) {
+                    std::cout << "# boxed " << number++ << ": type 0x" << std::hex << boxed.encodedType << std::dec << " class " << boxed.classRef
+                              << " count " << boxed.count << " offset " << boxed.offset << " bytes " << boxed.rawBytes.size() << " :";
+                    for (std::size_t at = 0; at + 4 <= boxed.rawBytes.size() && at < 256; at += 4) {
+                        float real; std::int32_t whole;
+                        std::memcpy(&real, boxed.rawBytes.data() + at, 4);
+                        std::memcpy(&whole, boxed.rawBytes.data() + at, 4);
+                        const float size = real < 0 ? -real : real;
+                        if (size > 0.0001f && size < 1.0e6f) std::cout << ' ' << real; else std::cout << " #" << whole;
+                    }
+                    std::cout << "\n";
+                }
+                for (const auto &import : document.imports) (void)import;
+                std::cout << "# imports " << document.imports.size() << ", arrays " << document.arrays.size() << ", types";
+                for (const auto &type : document.types) std::cout << ' ' << type.name;
+                std::cout << "\n";
                 return 0;
             }
             return 1;

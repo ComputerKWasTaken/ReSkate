@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.2.0 - 2026-10-04
+
+Built on ReSkate 1.0.7.
+
+- **Realistic, Fun and Everything.** The Tune tab opens on one of two short lists: REALISTIC
+  (pop, push speeds, flip catch times, bail limits, on-foot jump and sprint, all draggable below
+  the game's own values, with the Realistic preset one click away) and FUN (the big switches
+  and everything on foot and in the air). EVERYTHING is the whole table with search.
+  `trainer open realistic|fun|everything` opens them from the console.
+- **The game's other tuning.** Much of the game is not tuned by its physics tuning asset but by
+  data-defined classes: push speeds, on-foot jump, sprint, flips and rolls, wallrun, vault and
+  mantle, dive, torpedo and glide, bail fall speeds, flip catch times, grind control, pumping,
+  powerslide, the speed model. The trainer now finds 24 of them in memory (by the defaults and
+  field order the game's data ships) and lists their 314 values by name, next to the 3801 of
+  the tuning asset.
+- **Push speed scales every push.** "Push speed" now drives the game's own push speeds (a
+  tapped push, a held one, the top), so taps cruise faster or slower too. The three speeds are
+  on the Realistic list by themselves. Measured: x2 cruises at 8.2 m/s from taps (4.0 stock),
+  the Realistic preset at 3.0.
+- **On foot:** jump height (also as a multiplier beside the trick heights), sprint speed, flip
+  rotation and roll speed, wallrun boosts; in the air: glide gravity, air resistance and
+  steering, torpedo and dive steering. New presets: Moon Jump, Fast On Foot, Fast Parkour
+  Flips, Super Glide, Torpedo Boost. Measured: Moon Jump 0.9 m to 2.6 m, Fast On Foot 6.6 to
+  9.8 m/s. The flip, glide, torpedo and dive values were not exercised by a test.
+- **Powerslide** forward force and friction, for the speed tricks slides used to allow.
+- Trick height sliders go from x0.1 to x50 (Ctrl+click to type); the console takes 0.05 to 100.
+- Return after a bail no longer ignores the first bail of a session, and says in the log what
+  it did. (The switch is on the Practice tab.)
+- Not done: the speed of board flip tricks. The game keeps it in curves the trainer cannot
+  reach yet.
+
 ## v0.1.4 - 2026-10-03
 
 - **No comply height and boneless height.** Two new sliders beside the hippy jump's (Tune tab,

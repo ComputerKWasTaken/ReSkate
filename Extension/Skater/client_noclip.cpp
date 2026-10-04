@@ -211,29 +211,40 @@ void trainer_apply_jump_scale(std::uintptr_t core) noexcept {
         j.outcome.store(scaled ? 2 : before < 0.5f ? -1 : -2);
     } catch (...) { j.outcome.store(-3); }
 }
-// The trainer's top pushing speed. On the board the game holds the skater at the speed its
-// trick scripts ask for (context +0x17f4: 4 m/s for taps, then about 5, 7, 8.5 and 9.1 m/s as
-// a push is held) and never runs its own code for the push tuning values. So, after each
-// physics step while the skater rides with such a target: at the game's last step the skater
-// carries on to `top` times it, and a `top` under 1 holds every step down to that share of
-// the last one. The game's choice of step is left alone: it follows the skater's speed, and a
-// multiplier on every step feeds back into it (measured: x2 ran away to 17 m/s).
+// The trainer's push speed. On the board the game steers the skater to the speed its trick
+// scripts ask for (context +0x17f4) and never runs its own code for the push tuning values.
+// Measured: a tapped push asks for the skater's own speed kept between 4 and about 9.5 m/s, a
+// held one walks up 4.95, 6.98, 8.5 and 9.1 m/s, and the game holds that speed for about six
+// seconds after the last push before the skater coasts. A multiplier on that target would
+// feed back (the target follows the speed: x2 ran away to 17 m/s), so after each physics step
+// of a riding skater:
+//  - `factor` over 1: once the game has the skater at its tap speed it is carried on to
+//    4 m/s x factor; a held push that has reached the game's last step is carried on to that
+//    step x factor, and stays there while the game holds its own;
+//  - `factor` under 1: the skater is held down to the game's target x factor (it then never
+//    reaches the speed the next step would need, so nothing feeds back).
 // Auto push: the game hands its flag to the animation and nothing comes of it (measured: the
 // same coast-down with it on). With `cruise` set, a rolling skater that is not braking gains
-// speed gently up to it.
-constexpr float push_gain = 0.2f;  // m/s the game's own push gains each physics step (0 to 4 m/s in 19 steps)
-constexpr float last_step = 0.95f; // of the stock top pushing speed: the game's last step is 9.1 of 9.25 m/s
+// speed up to it.
+constexpr float push_gain = 0.2f;    // m/s the game's own push gains each physics step (0 to 4 m/s in 19 steps)
+constexpr float tap_speed = 4.0f;    // m/s the game's tapped push settles at
+constexpr float last_step = 0.95f;   // of the stock top pushing speed: the game's last step is 9.1 of 9.25 m/s
 constexpr float cruise_gain = 0.15f; // m/s each physics step: the game steers the speed back toward its own, so less does nothing
-struct PushTop {
-    std::atomic<float> top{1}, stock{9.25f}, cruise{};
+constexpr int held_steps = 36;       // a push flagged this long is held (a tap lasts 19 steps)
+constexpr int hold_steps = 360;      // how long after a push the game holds its speed
+struct PushSpeed {
+    std::atomic<float> factor{1}, stock{9.25f}, cruise{};
     std::uintptr_t client{}, entity{};
     std::atomic<ULONGLONG> expires{};
+    // Physics thread only.
+    int pushing{}, since_push{hold_steps};
+    bool carried{}; // a held push is being carried past the game's last step
 };
-PushTop& push_top() { static auto* value = new PushTop; return *value; }
-void trainer_push_top(std::uintptr_t core) noexcept {
-    auto& p = push_top();
-    const float top = p.top.load(std::memory_order_relaxed), cruise = p.cruise.load(std::memory_order_relaxed);
-    if ((top == 1 && cruise <= 0) || GetTickCount64() >= p.expires.load(std::memory_order_acquire)) return;
+PushSpeed& push_speed() { static auto* value = new PushSpeed; return *value; }
+void trainer_push_speed(std::uintptr_t core) noexcept {
+    auto& p = push_speed();
+    const float factor = p.factor.load(std::memory_order_relaxed), cruise = p.cruise.load(std::memory_order_relaxed);
+    if ((factor == 1 && cruise <= 0) || GetTickCount64() >= p.expires.load(std::memory_order_acquire)) return;
     const auto watch = watched_physics_state();
     if (!watch.valid || watch.state != 100) return; // riding the ground
     SourceLastError error;
@@ -256,15 +267,31 @@ void trainer_push_top(std::uintptr_t core) noexcept {
             flags[i] = reader.value<std::uint32_t>(bodies.parts[i], 0x60);
         }
         reader.verify();
+        if (requests & 0x40u) { // the push request the game's own push code tests
+            ++p.pushing;
+            p.since_push = 0;
+        } else {
+            p.pushing = 0;
+            if (p.since_push < hold_steps) ++p.since_push;
+        }
         const float speed = std::sqrt(velocities[0][0] * velocities[0][0] + velocities[0][2] * velocities[0][2]);
         if (!(speed >= 0.5f) || !(speed < 1000.0f)) return;
         const float stock = p.stock.load(std::memory_order_relaxed);
-        const bool pushed = target > 0.5f && target < 100.0f; // the game has a push speed in mind
+        const bool pushed = target > 0.5f && target < 100.0f && p.since_push < hold_steps; // the game is holding a push speed
+        const bool at_last_step = pushed && target >= stock * last_step && speed >= target * 0.9f;
+        if (braking || !at_last_step) p.carried = false;
+        else if (p.pushing >= held_steps) p.carried = true;
         float change = 0;
-        if (pushed && top > 1 && target >= stock * last_step && speed >= target * 0.9f) change = std::min(push_gain, target * top - speed);
-        // Pushed speed only: a hill's is faster than the game's target and is left alone.
-        else if (pushed && top < 1 && speed > stock * top && speed <= target * 1.1f) change = -std::min(push_gain, speed - stock * top);
-        else if (cruise > 0 && !braking && speed >= 1.0f && speed < std::min(cruise, stock * top)) change = std::min(cruise_gain, cruise - speed);
+        if (braking) {
+        } else if (pushed && factor > 1 && p.carried) {
+            change = std::min(push_gain, target * factor - speed);
+        } else if (pushed && factor > 1 && speed >= tap_speed * 0.85f && speed < tap_speed * factor) {
+            change = std::min(push_gain, tap_speed * factor - speed);
+        } else if (pushed && factor < 1 && speed > target * factor && speed <= target * 1.1f) {
+            change = -std::min(push_gain, speed - target * factor); // pushed speed only: a hill's is faster than the target
+        } else if (cruise > 0 && speed >= 1.0f && speed < cruise) {
+            change = std::min(cruise_gain, cruise - speed);
+        }
         if (std::abs(change) < 0.005f) return;
         const float scale = (speed + change) / speed;
         // Like the native velocity writers: XYZ at +70 and the dirty bit 8 at +60.
@@ -281,7 +308,7 @@ void noclip_physics_update(std::uintptr_t core) {
     if (original) original(core);
     noclip_apply_velocity(core);
     trainer_apply_jump_scale(core);
-    trainer_push_top(core);
+    trainer_push_speed(core);
 }
 bool noclip_motion_target(std::uintptr_t rig, std::uintptr_t context,
     const std::array<float,16>* supplied, std::array<float,16>& target) noexcept {
@@ -362,13 +389,13 @@ bool queue_jump_scale(std::uintptr_t client, std::uintptr_t entity, float factor
         return true;
     } catch (...) { return false; }
 }
-void set_push_top(std::uintptr_t client, std::uintptr_t entity, float top, float stock, float cruise) noexcept {
-    auto& p = push_top();
-    p.cruise.store(cruise > 0 && cruise < 100 ? cruise : 0.0f, std::memory_order_relaxed);
+void set_push_speed(std::uintptr_t client, std::uintptr_t entity, float factor, float stock, float cruise) noexcept {
+    auto& p = push_speed();
     p.client = client;
     p.entity = entity;
+    p.cruise.store(cruise > 0 && cruise < 100 ? cruise : 0.0f, std::memory_order_relaxed);
     p.stock.store(stock > 1 && stock < 100 ? stock : 9.25f, std::memory_order_relaxed);
-    p.top.store(top > 0.05f && top <= 20 ? top : 1.0f, std::memory_order_relaxed);
+    p.factor.store(factor > 0.02f && factor <= 50 ? factor : 1.0f, std::memory_order_relaxed);
     p.expires.store(GetTickCount64() + 500, std::memory_order_release);
 }
 JumpScaleResult take_jump_scale_result() noexcept {

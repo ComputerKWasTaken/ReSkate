@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <iterator>
+#include <string_view>
 #include <utility>
 
 namespace dingosdk::trainer {
@@ -22,37 +23,80 @@ const std::vector<Link> &value_links() {
         {"physicsairstates.maxspinspeed", "physicsbodyspin.pbsvst_easy x"},
         {"physicsairstates.maxspinspeed", "physicsbodyspin.maxdeltavstime x"},
         {"physicsairstates.maxspinspeed", "physicsbodyspin.maxdeltavstimeeasy x"},
+        // Pushing: the tuning's top pushing speed only gates whether a push may start. The speeds
+        // pushes aim for are the push class's (trainer_classes.h), scaled here by the same ratio.
+        {"physicspush.maxpushablespeed", "push.maxpushspeedlight"},
+        {"physicspush.maxpushablespeed", "push.maxpushspeedmedium"},
+        {"physicspush.maxpushablespeed", "push.maxpushspeedstrong"},
+        {"physicspush.maxpushablespeed", "push.minmediumpushoverridespeed"},
     };
     return links;
 }
-// Only values that do something: read by the game, or linked above.
-std::string_view essential_name(std::string_view key, int *rank) {
-    static constexpr std::array<std::pair<std::string_view, std::string_view>, 21> names{{
-        {"physicsmode.jumpmaxheight", "Ollie height (max)"},
-        {"physicsmode.jumpminheight", "Ollie height (min, light pop)"},
-        {"physicsmode.grindjumpcommonmax", "Pop out of grinds (max)"},
-        {"physicsjump.jumpybonusmax", "Jump bonus (max)"},
-        {"physicsreckoning.flipscalar", "Body flip speed"},
-        {"physicsreckoning.flipmaxspeed", "Body flip speed limit"},
-        {"physicsmode.perfectbodyflips", "Perfect body flips (exactly one rotation)"},
-        {"physicsairstates.maxspinspeed", "Body spin speed"},
-        {"physicsmode.maxautobodyspinspeed", "Auto body spin speed"},
-        {"physicsmode.easybodyspins", "Easy body spins"},
-        {"physicspush.maxpushablespeed", "Top pushing speed (m/s, hold push)"},
-        {"physicsmode.autopushenabled", "Auto push (keeps a rolling skater going)"},
-        {"physicspush.maxspeedforautopush", "Auto push speed (m/s)"},
-        {"physicsmode.speedwobblestartspeed", "Speed wobble starts at (m/s)"},
-        {"physicsmode.grindlockdist", "Grind lock-on distance"},
-        {"physicsgrind.commonfrictionscalar", "Grind friction"},
-        {"physicsmode.makesurfacessmooth", "Smooth surfaces"},
-        {"physicsmode.wipeoutcheckforbadlanding", "Bail on bad landings"},
-        {"physicsmode.wipeout_groundxzacceleration", "Bail: sideways hit limit"},
-        {"physicstrucks.truckzposfront", "Front truck position (next respawn)"},
-        {"physicstrucks.truckzposback", "Back truck position (next respawn)"},
-    }};
-    const auto found = std::ranges::find(names, key, &std::pair<std::string_view, std::string_view>::first);
-    if (rank) *rank = found == names.end() ? 0 : static_cast<int>(found - names.begin()) + 1;
-    return found == names.end() ? std::string_view{} : found->second;
+// The two short lists of the Tune tab. Only values that do something: read by the game, linked
+// above, or a field of one of the game's data-defined classes.
+std::string_view essential_name(std::string_view key, int *rank, std::uint8_t *modes) {
+    struct Name {
+        std::string_view key, label;
+        std::uint8_t modes;
+    };
+    constexpr std::uint8_t r = mode_realistic, f = mode_fun, both = mode_realistic | mode_fun;
+    static constexpr Name names[]{
+        {"physicsmode.jumpmaxheight", "Ollie height (max)", both},
+        {"physicsmode.jumpminheight", "Ollie height (min, light pop)", both},
+        {"physicsmode.grindjumpcommonmax", "Pop out of grinds (max)", both},
+        {"physicsjump.jumpybonusmax", "Jump bonus (max)", f},
+        {"physicspush.maxpushablespeed", "Push speed (9.25 = the game's; scales every push)", both},
+        {"push.maxpushspeedlight", "Push: a tapped push settles at (m/s)", r},
+        {"push.maxpushspeedmedium", "Push: a held push reaches (m/s)", r},
+        {"push.maxpushspeedstrong", "Push: top speed (m/s)", r},
+        {"physicsmode.autopushenabled", "Auto push (keeps a rolling skater going)", f},
+        {"physicspush.maxspeedforautopush", "Auto push speed (m/s)", f},
+        {"physicsreckoning.flipscalar", "Body flip speed", both},
+        {"physicsreckoning.flipmaxspeed", "Body flip speed limit", both},
+        {"physicsmode.perfectbodyflips", "Perfect body flips (exactly one rotation)", f},
+        {"physicsairstates.maxspinspeed", "Body spin speed", both},
+        {"physicsmode.maxautobodyspinspeed", "Auto body spin speed", both},
+        {"physicsmode.easybodyspins", "Easy body spins", f},
+        {"heldflip.straightflipcatchtime", "Flip catch time: kickflips and heelflips (s)", r},
+        {"heldflip.shuvmincatchtime", "Flip catch time: shuvits (s)", r},
+        {"heldflip.bigflipmincatchtime", "Flip catch time: big flips (s)", r},
+        {"physicsmode.speedwobblestartspeed", "Speed wobble starts at (m/s)", both},
+        {"physicsmode.grindlockdist", "Grind lock-on distance", both},
+        {"physicsgrind.commonfrictionscalar", "Grind friction", both},
+        {"physicsmode.makesurfacessmooth", "Smooth surfaces", f},
+        {"onboard_powerslide.powerslide_forwardforcescalar_slide", "Powerslide: forward force", f},
+        {"onboard_powerslide.frictionscalar_slide", "Powerslide: friction", both},
+        {"onboard_speedmodel.noinputbrakespeed", "Coasting: speed the skater slows to with no input (m/s)", r},
+        {"physicsmode.wipeoutcheckforbadlanding", "Bail on bad landings", both},
+        {"physicsmode.wipeout_groundxzacceleration", "Bail: sideways hit limit", both},
+        {"wipeoutfallspeed.normalmaxspeed_ground", "Bail: fall speed limit on the ground (m/s)", r},
+        {"wipeoutfallspeed.normalmaxspeed_grind", "Bail: fall speed limit in a grind (m/s)", r},
+        {"jump.basejumpheight", "On foot: jump height (m)", both},
+        {"jump.maxjumpheight", "On foot: highest jump (m)", both},
+        {"jump.maxjumpvelocity", "On foot: jump speed limit (m/s)", f},
+        {"jump.aircontrolforce", "On foot: steering in the air", f},
+        {"locomotion.sprintspeed", "On foot: sprint speed (m/s)", both},
+        {"locomotion.sprintspeedboost", "On foot: sprint boost speed (m/s)", f},
+        {"flumping.flumptuckmaxrotationvelocity", "On foot: flip rotation speed", both},
+        {"flumping.rollmaxvelocity", "On foot: roll speed (m/s)", f},
+        {"flumping.rollvelocitymultiplier", "On foot: roll speed gain", f},
+        {"wipeout.spreadeaglegravity", "Glide: gravity (-8; nearer 0 falls slower)", f},
+        {"wipeout.spreadeagleairresistance", "Glide: air resistance", f},
+        {"wipeout.spreadeagleaircontrolmax", "Glide: steering", f},
+        {"wipeout.torpedoaircontrolmax", "Torpedo: steering (fast)", f},
+        {"wipeout.torpedoaircontrolmin", "Torpedo: steering (slow)", f},
+        {"wipeout.defaultaircontrol", "Dive: steering", f},
+        {"wipeout.defaultairresistance", "Dive: air resistance", f},
+        {"wallrun.wallrunjumpupvelocityboost", "Wallrun: jump up boost", f},
+        {"wallrun.wallrungravity", "Wallrun: gravity", f},
+        {"physicstrucks.truckzposfront", "Front truck position (next respawn)", r},
+        {"physicstrucks.truckzposback", "Back truck position (next respawn)", r},
+    };
+    const auto found = std::ranges::find(names, key, &Name::key);
+    const bool known = found != std::end(names);
+    if (rank) *rank = known ? static_cast<int>(found - std::begin(names)) + 1 : 0;
+    if (modes) *modes = known ? found->modes : std::uint8_t{};
+    return known ? found->label : std::string_view{};
 }
 
 // Patterns are matched against the lower-case ids the game's own data gives its tuning
@@ -79,14 +123,25 @@ const std::vector<BuiltinPreset> &builtin_presets() {
           {"physicsmode.grindjump", true, 0.8}, {"physicspush.maxpushablespeed !camera", true, 0.75},
           {"physicsmode.speedwobblestartspeed", true, 0.7},
           {"physicsreckoning.flipscalar", true, 0.8}, {"physicsairstates.maxspinspeed", true, 0.75},
-          {"physicsmode.maxautobodyspinspeed", true, 0.75}, {"physicsmode.grindlockdist", true, 0.7},
+          {"physicsmode.maxautobodyspinspeed", true, 0.75}, {"physicsmode.grindlockdist", true, 0.7}, {"jump.basejumpheight", true, 0.85}, {"jump.maxjumpheight", true, 0.85},
+          {"locomotion.sprintspeed", true, 0.85}, {"wipeoutfallspeed.", true, 0.8},
           {"physicswipeout.wipeout_ maxspeed", true, 0.8}, {"physicsmode.wipeout_ acceleration", true, 0.8}}},
         {"Mega Pop", "Ollies and grind pops go about twice as high.",
          {{"physicsmode.jumpmaxheight", true, 2.0}, {"physicsmode.jumpminheight", true, 1.6},
           {"physicsjump.jumpybonusmax", true, 2.0}, {"physicsmode.grindjump", true, 1.6}}},
-        {"Fast", "Hold push to reach a much higher top speed.",
+        {"Fast", "Every push is 1.8 times as fast.",
          {{"physicspush.maxpushablespeed !camera", true, 1.8}, {"physicspush.maxspeedforautopush", true, 1.8},
           {"physicsmode.speedwobblestartspeed", true, 3.0}}},
+        {"Moon Jump", "On foot: jumps about three times as high.",
+         {{"jump.basejumpheight", true, 3.0}, {"jump.maxjumpheight", true, 3.0}, {"jump.maxjumpvelocity", true, 2.0}}},
+        {"Fast On Foot", "On foot: sprint nearly twice as fast.",
+         {{"locomotion.sprintspeed", true, 1.8}, {"locomotion.sprintspeedboost", true, 1.8}}},
+        {"Fast Parkour Flips", "On foot: flips and rolls rotate and travel much faster.",
+         {{"flumping.flumptuckmaxrotationvelocity", true, 2.5}, {"flumping.rollmaxvelocity", true, 2.0}, {"flumping.rollvelocitymultiplier", true, 1.5}}},
+        {"Super Glide", "Spread-eagle falls slowly and steers hard.",
+         {{"wipeout.spreadeaglegravity", true, 0.35}, {"wipeout.spreadeagleaircontrolmax", true, 2.0}, {"wipeout.spreadeagleaircontrolmin", true, 2.0}}},
+        {"Torpedo Boost", "Torpedo and dive steer and carry much harder.",
+         {{"wipeout.torpedoaircontrolmax", true, 2.5}, {"wipeout.torpedoaircontrolmin", true, 2.5}, {"wipeout.defaultaircontrol", true, 2.0}}},
         {"No Speed Wobble", "The board stays steady at any speed.", {{"physicsmode.speedwobblestartspeed", true, 20.0}}},
         {"Auto Push", "Once rolling, the skater keeps gaining speed up to the auto push speed (8 m/s).", {{"physicsmode.autopushenabled", false, 1.0}}},
         {"Hard To Bail", "Much larger impacts are needed before a wipeout.",

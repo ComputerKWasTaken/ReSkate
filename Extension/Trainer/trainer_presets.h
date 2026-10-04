@@ -1,4 +1,5 @@
 #pragma once
+#include "trainer.h"
 #include <cstdint>
 #include <string_view>
 #include <vector>
@@ -17,8 +18,9 @@ struct BuiltinPreset {
     std::string_view name, note;
     std::vector<PresetRule> rules;
 };
-// The plain name of a value on the Essentials list, by its lower-case id; empty for the rest.
-std::string_view essential_name(std::string_view key, int *rank = nullptr);
+// The plain name of a value on the Tune tab's short lists, by its lower-case id; empty for the
+// rest. `modes`: which lists it is on (mode_realistic, mode_fun).
+std::string_view essential_name(std::string_view key, int *rank = nullptr, std::uint8_t *modes = nullptr);
 // Whether the game's code was found to read the tuning value at this offset of the asset.
 // False means "no use found": changing it will probably do nothing.
 bool value_used(std::uint16_t offset);
