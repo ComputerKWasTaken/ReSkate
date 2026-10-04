@@ -856,6 +856,17 @@ void dedicated_server_codec() {
     check(row && row->dedicated && row->name == "Big  friendly server" && row->map == ad.map && row->players == 3 &&
               row->capacity == 16 && row->password_required && row->code == format_invite({server, ad.secret}),
           "Server tags did not round trip");
+    // A whole last character is kept, and one the byte limit cuts through is dropped whole.
+    const auto accented = read_server_tags(dingosdk::server::server_tags({"Skate Caf\xC3\xA9", "Caf\xC3\xA9", 1, 8, false, true, 1}), server);
+    check(accented && accented->name == "Skate Caf\xC3\xA9" && accented->map == "Caf\xC3\xA9",
+          "A server name lost its non-ASCII last letter");
+    for (std::size_t lead = 0; lead < 3; ++lead) {
+        std::string euros(lead, 'a');
+        for (int i = 0; i < 50; ++i) euros += "\xE2\x82\xAC";
+        const auto cut = dingosdk::server::server_tags({euros, "Caf\xC3\xA9", 1, 8, false, true, 1});
+        const auto name = cut.substr(cut.find(",n") + 2);
+        check(cut.size() < 128 && name.size() > lead && (name.size() - lead) % 3 == 0, "A server name was cut inside a character");
+    }
     check(!read_server_tags(tags, player), "A player's ID read as a server");
     check(!read_server_tags("reskate,v1,k1,c4", server), "An incompatible server version listed");
 }
