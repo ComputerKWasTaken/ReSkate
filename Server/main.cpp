@@ -171,6 +171,16 @@ Input &console_input() {
     return input;
 }
 constexpr auto update_interval = std::chrono::minutes(30);
+#ifdef _WIN32
+// Double-clicked, the server is alone on a visible console that closes with it.
+// From a terminal, a script, a hosting panel or a hidden scheduled task it is not.
+bool own_window() {
+    DWORD processes[2]{};
+    const auto window = GetConsoleWindow();
+    return GetConsoleProcessList(processes, 2) == 1 && window && IsWindowVisible(window) &&
+           GetFileType(GetStdHandle(STD_INPUT_HANDLE)) == FILE_TYPE_CHAR;
+}
+#endif
 } // namespace
 
 #ifdef _WIN32
@@ -447,6 +457,14 @@ int wmain(int argc, wchar_t **argv) {
         }
     }
     finished = true;
+    // Keep a failure on screen until the host has read it, instead of the window
+    // vanishing with it. Closing the window or Ctrl+C still ends it at once.
+    if (code != 0 && !stopping && own_window()) {
+        auto &input = console_input();
+        input.take();
+        std::printf("Press Enter to close.\n");
+        while (!stopping && input.take().empty()) Sleep(50);
+    }
     return code;
 }
 #else
