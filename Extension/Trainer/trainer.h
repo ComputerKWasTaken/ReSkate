@@ -33,7 +33,13 @@ struct Row {
 };
 struct PresetRow {
     std::string name, note;
-    bool builtin{}, active{};
+    bool builtin{}, active{}; // active: every value it sets holds what it sets, right now
+    // A dial: one multiplier that moves everything the preset moves, 1 = the game's own and
+    // `amount` = the preset as it ships. `factor` is where its first value stands.
+    bool dial{};
+    std::string title;
+    double factor{1}, amount{1};
+    std::uint8_t modes{}; // which of the short lists show it (mode_realistic, mode_fun)
 };
 struct Marker {
     bool set{};

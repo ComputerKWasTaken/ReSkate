@@ -14,7 +14,7 @@
 namespace dingosdk::overlay::menu {
 namespace {
 struct Page {
-    int tab{1}; // opens on PRESETS: the quick switches
+    int tab{}; // opens on TUNE: the dials and switches
     std::array<char, 96> search{};
     int mode{1}; // the Tune tab: 0 Realistic, 1 Fun (two short lists), 2 Everything
     int group{1}; // Everything: 1: every group, 2..: one of the view's groups
@@ -75,7 +75,8 @@ void filter_rows(Page &p, const trainer::View &view) {
     for (std::size_t i = 0; i < view.rows.size(); ++i) {
         const auto &row = view.rows[i];
         if (essentials) {
-            if (!row.friendly.empty() && (row.modes & list)) p.shown.push_back(i);
+            // Only what the game was found or seen to read: a short list has no room for maybes.
+            if (!row.friendly.empty() && (row.modes & list) && row.used) p.shown.push_back(i);
             continue;
         }
         if (row.detail && !p.graph_points && !row.touched) continue;
@@ -98,7 +99,7 @@ void value_row(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const tra
     ImGui::PushID(row.id.c_str());
     bool frozen = row.frozen;
     if (ImGui::Checkbox("##freeze", &frozen)) trainer_command(menu, callbacks, std::format("freeze {} {}", row.id, frozen ? 1 : 0));
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Lock: presets and Reset all leave this value alone.\nYou do not need it for a change to apply.");
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Lock: presets and Reset values leave this value alone.\nReset everything (top of the page) clears locks too.\nYou do not need it for a change to apply.");
     ImGui::SameLine();
     const float column = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x * 0.52f;
     const auto label = friendly && !row.friendly.empty() ? row.friendly : with_group ? row.group + " / " + row.label : row.label;
@@ -146,7 +147,58 @@ void value_row(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const tra
     ImGui::PopID();
 }
 
-void tune_tab(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const trainer::View &view) {
+// A built-in preset as a switch: blue while every value it sets holds what it sets.
+void preset_switch(SkateMenu &menu, const CallbacksV3 &callbacks, const trainer::PresetRow &preset) {
+    if (preset.active) ImGui::PushStyleColor(ImGuiCol_Button, skate_theme::blue);
+    const bool pressed = ImGui::Button(preset.name.c_str());
+    if (preset.active) ImGui::PopStyleColor();
+    if (pressed) trainer_command(menu, callbacks, std::string(preset.active ? "preset remove " : "preset apply ") + preset.name);
+    if (ImGui::IsItemHovered() && !preset.note.empty()) ImGui::SetTooltip("%s", preset.note.c_str());
+}
+// A built-in preset as a dial: one multiplier that moves everything the preset moves.
+void dial_row(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const trainer::PresetRow &preset) {
+    ImGui::PushID(preset.name.c_str());
+    const float column = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x * 0.40f;
+    const bool moved = std::abs(preset.factor - 1.0) > 1e-4;
+    if (moved) ImGui::PushStyleColor(ImGuiCol_Text, skate_theme::blue);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(preset.title.c_str());
+    if (moved) ImGui::PopStyleColor();
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s\n1 is the game's own; \"%s\" is x %s.", preset.note.c_str(), preset.name.c_str(), number(preset.amount).c_str());
+    ImGui::SameLine(column);
+    const float button = ImGui::CalcTextSize("Fast Parkour Flips").x + ImGui::GetStyle().FramePadding.x * 2;
+    const float reset = ImGui::CalcTextSize("Reset").x + ImGui::GetStyle().FramePadding.x * 2;
+    const auto id = "dial:" + preset.name;
+    double value = p.active == id ? p.active_value : preset.factor;
+    // A preset that turns its value down gets a dial with more room below 1.
+    const double low = preset.amount < 1 ? 0.05 : 0.2, high = preset.amount < 1 ? 3.0 : 10.0;
+    ImGui::SetNextItemWidth(std::max(px(90), ImGui::GetContentRegionAvail().x - button - reset - ImGui::GetStyle().ItemSpacing.x * 2));
+    if (ImGui::SliderScalar("##dial", ImGuiDataType_Double, &value, &low, &high, "x %.2f", ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_Logarithmic))
+        trainer_command(menu, callbacks, std::format("dial {} {}", number(value), preset.name));
+    if (ImGui::IsItemActive()) {
+        p.active = id;
+        p.active_value = value;
+    } else if (p.active == id) {
+        p.active.clear();
+    }
+    ImGui::SameLine();
+    if (preset.active) ImGui::PushStyleColor(ImGuiCol_Button, skate_theme::blue);
+    const bool pressed = ImGui::Button(preset.name.c_str(), ImVec2(button, 0));
+    if (preset.active) ImGui::PopStyleColor();
+    if (pressed) trainer_command(menu, callbacks, std::string(preset.active ? "preset remove " : "preset apply ") + preset.name);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", preset.note.c_str());
+    if (moved) {
+        ImGui::SameLine();
+        if (ImGui::Button("Reset", ImVec2(reset, 0))) trainer_command(menu, callbacks, "dial 1 " + preset.name);
+    }
+    ImGui::PopID();
+}
+
+// One screen for everything that changes how the game plays: the presets as dials and
+// switches, the trick multipliers, the player's own presets and the values themselves. All of
+// them show the same values, so none can disagree with another.
+void tune_tab(SkateMenu &menu, const Model &model, const CallbacksV3 &callbacks, Page &p, const trainer::View &view) {
     if (!view.ready) {
         begin_card(menu, "tune-wait", "PHYSICS TUNING");
         note(view.status.c_str());
@@ -167,40 +219,89 @@ void tune_tab(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const trai
             if (on) ImGui::PopStyleColor();
         }
     }
-    const auto preset_on = [&](std::string_view name) {
-        for (const auto &preset : view.presets)
-            if (preset.name == name) return preset.active;
-        return false;
-    };
-    const auto preset_button = [&](const char *name) {
-        const bool on = preset_on(name);
-        if (on) ImGui::PushStyleColor(ImGuiCol_Button, skate_theme::blue);
-        if (ImGui::Button(name)) trainer_command(menu, callbacks, std::string(on ? "preset remove " : "preset apply ") + name);
-        if (on) ImGui::PopStyleColor();
-    };
-    ImGui::BeginDisabled(!view.editable || !callbacks.queue_console_command);
-    if (p.mode == 0) {
-        note("Tone the game down: lower pop, slower pushing and rotation, stricter catches and bails. Drag any value below the game's own.");
-        preset_button("Realistic");
-        ImGui::SameLine();
-        if (ImGui::Button("Reset all")) trainer_command(menu, callbacks, "reset all");
-        ImGui::SameLine();
-        ImGui::TextDisabled("%zu changed", view.touched);
-    } else if (p.mode == 1) {
-        note("Turn it up: huge pop, fast pushing, flips, spins, and everything on foot and in the air.");
-        static constexpr const char *fun[]{"Super Ollie", "Fast", "Fast Flips", "Fast Spins", "Auto Push", "Moon Jump", "Fast On Foot",
-                                           "Fast Parkour Flips", "Super Glide", "Torpedo Boost"};
-        for (std::size_t i = 0; i < std::size(fun); ++i) {
-            if (i && ImGui::GetItemRectMax().x + ImGui::CalcTextSize(fun[i]).x + ImGui::GetStyle().FramePadding.x * 4 <
-                         ImGui::GetWindowPos().x + ImGui::GetContentRegionMax().x)
-                ImGui::SameLine();
-            preset_button(fun[i]);
-        }
-        if (ImGui::Button("Reset all")) trainer_command(menu, callbacks, "reset all");
-        ImGui::SameLine();
-        ImGui::TextDisabled("%zu changed", view.touched);
+    const std::uint8_t list = p.mode == 0 ? trainer::mode_realistic : p.mode == 1 ? trainer::mode_fun : std::uint8_t{0xff};
+    const bool can_edit = view.editable && callbacks.queue_console_command != nullptr;
+
+    begin_card(menu, "dials", p.mode == 0 ? "FEEL: TONE IT DOWN" : p.mode == 1 ? "FEEL: TURN IT UP" : "FEEL",
+               "1 is the game's own. A dial moves every value its preset moves.");
+    ImGui::BeginDisabled(!can_edit);
+    for (const auto &preset : view.presets)
+        if (preset.builtin && preset.dial && (p.mode == 2 || (preset.modes & list))) dial_row(menu, callbacks, p, preset);
+    // The presets that are plain switches, and the ones that set several dials at once.
+    bool first = true;
+    for (const auto &preset : view.presets) {
+        if (!preset.builtin || preset.dial || preset.name == "Stock" || !(p.mode == 2 || (preset.modes & list))) continue;
+        if (!first && ImGui::GetItemRectMax().x + ImGui::CalcTextSize(preset.name.c_str()).x + ImGui::GetStyle().FramePadding.x * 4 <
+                          ImGui::GetWindowPos().x + ImGui::GetContentRegionMax().x)
+            ImGui::SameLine();
+        first = false;
+        preset_switch(menu, callbacks, preset);
     }
     ImGui::EndDisabled();
+    if (p.mode != 0) {
+        // The game's own bail protection, the same switch as Skater > Movement.
+        const auto &debug = model.debug;
+        bool no_bail = debug.no_bail;
+        if (toggle_row(menu, "Never bail", "No wipeouts at all. Recover from a bail before switching it on.", no_bail,
+                (debug.no_bail_available || debug.no_bail) && callbacks.queue_debug != nullptr))
+            debug_request(menu, callbacks, {DebugAction::set_no_bail, no_bail});
+    }
+    ImGui::BeginDisabled(!can_edit || !view.touched);
+    if (ImGui::Button("Reset values")) trainer_command(menu, callbacks, "reset all");
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Every tuning value back to the game's own. Locked values stay.");
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextDisabled("%zu values changed", view.touched);
+    end_card();
+
+    trick_heights(menu, callbacks, p, view);
+
+    if (p.mode == 2) {
+        begin_card(menu, "preset-save", "YOUR PRESETS", "Save what is changed right now");
+        ImGui::BeginDisabled(!can_edit);
+        const float button = ImGui::CalcTextSize("Turn off").x + ImGui::GetStyle().FramePadding.x * 2;
+        for (const auto &preset : view.presets) {
+            if (preset.builtin) continue;
+            ImGui::PushID(preset.name.c_str());
+            if (preset.active) {
+                ImGui::PushStyleColor(ImGuiCol_Button, skate_theme::blue);
+                if (ImGui::Button("Turn off", ImVec2(button, 0))) trainer_command(menu, callbacks, "preset remove " + preset.name);
+                ImGui::PopStyleColor();
+            } else if (ImGui::Button("Turn on", ImVec2(button, 0))) {
+                trainer_command(menu, callbacks, "preset apply " + preset.name);
+            }
+            ImGui::SameLine();
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted(preset.name.c_str());
+            ImGui::SameLine();
+            ImGui::TextDisabled("%s", preset.note.c_str());
+            ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - px(120));
+            if (ImGui::SmallButton("This map")) trainer_command(menu, callbacks, "profile set " + preset.name);
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Delete")) trainer_command(menu, callbacks, "preset delete " + preset.name);
+            ImGui::PopID();
+        }
+        ImGui::EndDisabled();
+        field(menu, "Name");
+        const float save = ImGui::CalcTextSize("Save").x + ImGui::GetStyle().FramePadding.x * 2;
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - save - ImGui::GetStyle().ItemSpacing.x);
+        ImGui::InputText("##preset-name", p.preset_name.data(), p.preset_name.size());
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!p.preset_name[0] || !view.touched);
+        if (ImGui::Button("Save", ImVec2(save, 0))) trainer_command(menu, callbacks, std::string("preset save ") + p.preset_name.data());
+        ImGui::EndDisabled();
+        if (!view.map.empty()) {
+            info(menu, "This map applies", view.profile_preset.empty() ? "nothing" : view.profile_preset);
+            if (!view.profile_preset.empty() && ImGui::Button("Stop applying it on this map")) trainer_command(menu, callbacks, "profile clear");
+            note("\"This map\" beside one of your presets applies it every time this map loads.");
+        }
+        end_card();
+    }
+
+    // The values themselves: the short list's, or all of them.
+    ImGui::Spacing();
+    ImGui::SeparatorText(p.mode == 2 ? "EVERY VALUE" : "FINE TUNING");
     if (p.mode == 2) {
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.42f);
         ImGui::InputTextWithHint("##search", "Search every value...", p.search.data(), p.search.size());
@@ -215,11 +316,6 @@ void tune_tab(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const trai
                 if (ImGui::Selectable(view.groups[i].c_str(), p.group == static_cast<int>(i) + 2)) p.group = static_cast<int>(i) + 2;
             ImGui::EndCombo();
         }
-        ImGui::SameLine();
-        ImGui::BeginDisabled(!view.touched || !view.editable);
-        if (ImGui::Button("Reset all")) trainer_command(menu, callbacks, "reset all");
-        ImGui::EndDisabled();
-        note("Changes apply as you drag. The box on the left only locks a value against presets and Reset all.");
         ImGui::Checkbox("Only what I changed", &p.only_changed);
         ImGui::SameLine();
         ImGui::Checkbox("Graph points", &p.graph_points);
@@ -227,7 +323,9 @@ void tune_tab(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const trai
         ImGui::SameLine();
         ImGui::Checkbox("Values with no use found", &p.show_unused);
         if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Also list the tuning values that no game code was found reading.\nChanging those will probably do nothing.");
+            ImGui::SetTooltip("Also list the tuning values that the game was never found or seen reading.\nChanging those will probably do nothing.");
+    } else {
+        note("The same values the dials move, one at a time. The box on the left locks a value against presets, dials and Reset values.");
     }
     filter_rows(p, view);
     if (p.mode == 2) {
@@ -235,18 +333,14 @@ void tune_tab(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const trai
         if (p.hidden_unused) ImGui::TextDisabled("%zu shown, %zu changed, %zu hidden", p.shown.size(), view.touched, p.hidden_unused);
         else ImGui::TextDisabled("%zu shown, %zu changed", p.shown.size(), view.touched);
     }
-    // The trick heights are not tuning values; they sit with the short lists.
-    if (p.mode < 2) trick_heights(menu, callbacks, p, view);
     const bool with_group = p.mode == 2 && (p.search[0] != 0 || p.group <= 1 || p.only_changed);
     const bool friendly = p.mode < 2;
-    ImGui::BeginChild("tune-rows", ImVec2(0, 0), ImGuiChildFlags_None);
     ImGuiListClipper clipper;
     clipper.Begin(static_cast<int>(p.shown.size()));
     while (clipper.Step())
         for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
             value_row(menu, callbacks, p, view, view.rows[p.shown[static_cast<std::size_t>(i)]], with_group, friendly);
     if (p.shown.empty()) note("Nothing matches.");
-    ImGui::EndChild();
 }
 
 void trick_heights(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const trainer::View &view) {
@@ -269,85 +363,11 @@ void trick_heights(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const
     slider("Boneless height", "boneless_height", view.boneless_height, p.boneless_edit, p.boneless_editing);
     slider("Hippy jump height", "hippy_height", view.hippy_height, p.hippy_edit, p.hippy_editing);
     slider("Off-board jump height", "offboard_height", view.offboard_height, p.offboard_edit, p.offboard_editing);
+    if (ImGui::Button("Reset tricks")) {
+        p.hippy_editing = p.nocomply_editing = p.boneless_editing = p.offboard_editing = p.flip_editing = false;
+        trainer_command(menu, callbacks, "reset tricks");
+    }
     note("Not tuning values: the game sets these in its trick scripts and flip curves. Ctrl+click a slider to type a number.");
-    end_card();
-}
-void presets_tab(SkateMenu &menu, const Model &model, const CallbacksV3 &callbacks, Page &p, const trainer::View &view) {
-    if (!view.editable && !view.blocked.empty()) warn(view.blocked.c_str());
-    begin_card(menu, "quick", "QUICK", "The ones everybody wants");
-    {
-        const auto active = [&](std::string_view name) {
-            for (const auto &preset : view.presets)
-                if (preset.name == name) return preset.active;
-            return false;
-        };
-        const auto quick = [&](const char *name, const char *label, const char *hint) {
-            bool on = active(name);
-            if (toggle_row(menu, label, hint, on, view.ready && view.editable && callbacks.queue_console_command != nullptr))
-                trainer_command(menu, callbacks, std::string(on ? "preset apply " : "preset remove ") + name);
-        };
-        quick("Super Ollie", "Super high ollie", "About four times the pop, off the ground and out of grinds.");
-        quick("Fast Flips", "Fast flips", "Flip tricks spin three times as fast.");
-        quick("Fast Spins", "Fast spins", "Spin three times as fast.");
-        // The game's own bail protection, the same switch as Skater > Movement.
-        const auto &debug = model.debug;
-        bool no_bail = debug.no_bail;
-        if (toggle_row(menu, "Never bail", "No wipeouts at all. Recover from a bail before switching it on.", no_bail,
-                (debug.no_bail_available || debug.no_bail) && callbacks.queue_debug != nullptr))
-            debug_request(menu, callbacks, {DebugAction::set_no_bail, no_bail});
-    }
-    end_card();
-    trick_heights(menu, callbacks, p, view);
-    begin_card(menu, "presets", "PRESETS", "Switch any of them on and off; they stack");
-    ImGui::BeginDisabled(!view.ready || !view.editable);
-    const float button = ImGui::CalcTextSize("Turn off").x + ImGui::GetStyle().FramePadding.x * 2;
-    for (const auto &preset : view.presets) {
-        ImGui::PushID(preset.name.c_str());
-        if (preset.name == "Stock") {
-            // Not a preset to switch: everything back to how the map loaded.
-            if (ImGui::Button("Reset", ImVec2(button, 0))) trainer_command(menu, callbacks, "preset apply Stock");
-        } else if (preset.active) {
-            ImGui::PushStyleColor(ImGuiCol_Button, skate_theme::blue);
-            if (ImGui::Button("Turn off", ImVec2(button, 0))) trainer_command(menu, callbacks, "preset remove " + preset.name);
-            ImGui::PopStyleColor();
-        } else if (ImGui::Button("Turn on", ImVec2(button, 0))) {
-            trainer_command(menu, callbacks, "preset apply " + preset.name);
-        }
-        ImGui::SameLine();
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted(preset.name.c_str());
-        if (preset.active && preset.name != "Stock") {
-            ImGui::SameLine();
-            tag(menu, "ON", skate_theme::blue);
-        }
-        ImGui::SameLine();
-        ImGui::TextDisabled("%s", preset.note.c_str());
-        if (!preset.builtin) {
-            ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - px(120));
-            if (ImGui::SmallButton("This map")) trainer_command(menu, callbacks, "profile set " + preset.name);
-            ImGui::SameLine();
-            if (ImGui::SmallButton("Delete")) trainer_command(menu, callbacks, "preset delete " + preset.name);
-        }
-        ImGui::PopID();
-    }
-    ImGui::EndDisabled();
-    end_card();
-
-    begin_card(menu, "preset-save", "YOUR PRESETS", "Save what is changed right now");
-    field(menu, "Name");
-    const float save = ImGui::CalcTextSize("Save").x + ImGui::GetStyle().FramePadding.x * 2;
-    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - save - ImGui::GetStyle().ItemSpacing.x);
-    ImGui::InputText("##preset-name", p.preset_name.data(), p.preset_name.size());
-    ImGui::SameLine();
-    ImGui::BeginDisabled(!p.preset_name[0] || !view.touched);
-    if (ImGui::Button("Save", ImVec2(save, 0))) trainer_command(menu, callbacks, std::string("preset save ") + p.preset_name.data());
-    ImGui::EndDisabled();
-    info(menu, "Changed values", std::to_string(view.touched));
-    if (!view.map.empty()) {
-        info(menu, "This map applies", view.profile_preset.empty() ? "nothing" : view.profile_preset);
-        if (!view.profile_preset.empty() && ImGui::Button("Stop applying it on this map")) trainer_command(menu, callbacks, "profile clear");
-        note("\"This map\" beside one of your presets applies it every time this map loads.");
-    }
     end_card();
 }
 
@@ -514,7 +534,8 @@ bool trainer_take_open() {
     auto &p = page();
     if (view->open_serial == p.open_serial) return false;
     p.open_serial = view->open_serial;
-    p.tab = view->open_tab >= 4 ? 0 : std::clamp(view->open_tab, 0, 3);
+    // `trainer open` still takes "presets": they live on the Tune tab now.
+    p.tab = view->open_tab >= 4 ? 0 : std::clamp(view->open_tab - 1, 0, 2);
     if (view->open_tab >= 4) p.mode = std::clamp(view->open_tab - 4, 0, 2);
     p.show_page = true;
     return true;
@@ -528,13 +549,21 @@ bool trainer_page_wanted() {
 void trainer_page(SkateMenu &menu, const Model &model, const CallbacksV3 &callbacks) {
     auto &p = page();
     const auto view = trainer::view();
-    category_tabs(menu, p.tab, {"TUNE", "PRESETS", "PRACTICE", "MAP & HUD"}, "trainer-tabs");
+    ImGui::BeginDisabled(!callbacks.queue_console_command);
+    if (ImGui::Button("RESET EVERYTHING")) {
+        p.hippy_editing = p.nocomply_editing = p.boneless_editing = p.offboard_editing = p.flip_editing = false;
+        trainer_command(menu, callbacks, "reset everything");
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextDisabled("The game as it shipped: every value, lock, preset and trick slider.");
+    category_tabs(menu, p.tab, {"TUNE", "PRACTICE", "MAP & HUD"}, "trainer-tabs");
     ImGui::PushID(p.tab);
     ImGui::BeginChild("trainer-tab", ImVec2(0, page_body_height(menu)));
     switch (p.tab) {
-    case 0: tune_tab(menu, callbacks, p, *view); break;
-    case 1: presets_tab(menu, model, callbacks, p, *view); break;
-    case 2: practice_tab(menu, model, callbacks, p, *view); break;
+    case 0: tune_tab(menu, model, callbacks, p, *view); break;
+    case 1: practice_tab(menu, model, callbacks, p, *view); break;
     default: map_tab(menu, callbacks, *view); break;
     }
     ImGui::EndChild();

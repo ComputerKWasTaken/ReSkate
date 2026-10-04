@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.3.0 - 2026-10-04
+
+Built on ReSkate 1.0.7.
+
+- **One Tune screen.** The Presets tab is gone: presets, trick sliders, your own presets and the
+  values are one screen, still split into REALISTIC, FUN and EVERYTHING. They all show the same
+  values, so a preset can no longer say "on" while a slider says something else.
+- **Presets are dials.** Each built-in preset is a slider: 1 is the game's own, the preset's
+  number is the preset as it shipped (Super Ollie = Ollie height x3), and anything between or
+  beyond works. Below 1 turns the same things down, which is what the Realistic list is for.
+  The preset's button still switches it on and off, and lights up whenever the values match
+  it, whatever set them. `trainer dial <multiplier> <preset name>` from the console.
+- **Reset everything**, above the tabs: every value, lock, preset and trick slider back to the
+  game as it shipped. Locked values used to survive every reset (a locked ollie height kept
+  Super Ollie alive), and the trick sliders had no reset at all. Each part also has its own:
+  Reset values (keeps locks, and says how many), Reset tricks.
+- **More values confirmed, by hand.** A player ground, pumped, climbed, vaulted and bailed while
+  the trainer watched which values the game read: 56 more are confirmed (climbing 23, vault
+  and mantle 10, the speed model 8, push 7, bails 5, grind control 3), 243 of 314 in all. The
+  71 that were never read in any of it (all of pumping, the double-stick flip metrics, grind
+  lean and transition, strong-impact bounces) stay listed as "no use found".
+- The short lists only show values the game was found or seen to read.
+- Torpedo Boost no longer names a value the game does not have.
+
 ## v0.2.0 - 2026-10-04
 
 Built on ReSkate 1.0.7.

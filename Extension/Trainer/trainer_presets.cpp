@@ -83,7 +83,6 @@ std::string_view essential_name(std::string_view key, int *rank, std::uint8_t *m
         {"wipeout.spreadeagleairresistance", "Glide: air resistance", f},
         {"wipeout.spreadeagleaircontrolmax", "Glide: steering", f},
         {"wipeout.torpedoaircontrolmax", "Torpedo: steering (fast)", f},
-        {"wipeout.torpedoaircontrolmin", "Torpedo: steering (slow)", f},
         {"wipeout.defaultaircontrol", "Falling: steering", f},
         {"wipeout.defaultairresistance", "Falling: air resistance", f},
         {"wallrun.wallrunjumpupvelocityboost", "Wallrun: jump up boost", f},
@@ -96,6 +95,36 @@ std::string_view essential_name(std::string_view key, int *rank, std::uint8_t *m
     if (rank) *rank = known ? static_cast<int>(found - std::begin(names)) + 1 : 0;
     if (modes) *modes = known ? found->modes : std::uint8_t{};
     return known ? found->label : std::string_view{};
+}
+
+PresetDial preset_dial(std::string_view name) {
+    struct Dial {
+        std::string_view name, title;
+        std::uint8_t modes;
+    };
+    constexpr std::uint8_t r = mode_realistic, f = mode_fun, both = mode_realistic | mode_fun;
+    static constexpr Dial dials[]{
+        {"Super Ollie", "Ollie height", both},
+        {"Fast", "Push speed", both},
+        {"Fast Flips", "Body flip speed", both},
+        {"Fast Spins", "Body spin speed", both},
+        {"Hard To Bail", "Bail resistance (higher: harder to bail)", both},
+        {"Sticky Grinds", "Grind lock-on", both},
+        {"Slick Grinds", "Grind friction", both},
+        {"Moon Jump", "On foot: jump height", both},
+        {"Fast On Foot", "On foot: sprint speed", both},
+        {"Fast Parkour Flips", "On foot: flip and roll speed", f},
+        {"Super Glide", "Glide: gravity (lower falls slower)", f},
+        {"Torpedo Boost", "Torpedo and falling: steering", f},
+        {"Realistic", "", r},
+        {"Mega Pop", "", 0},
+        {"No Speed Wobble", "", f},
+        {"Auto Push", "", f},
+        {"Smooth Surfaces", "", f},
+        {"Long Wheelbase", "", both},
+    };
+    const auto found = std::ranges::find(dials, name, &Dial::name);
+    return found == std::end(dials) ? PresetDial{} : PresetDial{found->title, found->modes};
 }
 
 // Patterns are matched against the lower-case ids the game's own data gives its tuning
@@ -140,7 +169,7 @@ const std::vector<BuiltinPreset> &builtin_presets() {
         {"Super Glide", "Spread-eagle falls slowly and steers hard.",
          {{"wipeout.spreadeaglegravity", true, 0.35}, {"wipeout.spreadeagleaircontrolmax", true, 2.0}, {"wipeout.spreadeagleaircontrolmin", true, 2.0}}},
         {"Torpedo Boost", "Torpedo steers and carries much harder, and so does a plain fall.",
-         {{"wipeout.torpedoaircontrolmax", true, 2.5}, {"wipeout.torpedoaircontrolmin", true, 2.5}, {"wipeout.defaultaircontrol", true, 2.0}}},
+         {{"wipeout.torpedoaircontrolmax", true, 2.5}, {"wipeout.defaultaircontrol", true, 2.0}}},
         {"No Speed Wobble", "The board stays steady at any speed.", {{"physicsmode.speedwobblestartspeed", true, 20.0}}},
         {"Auto Push", "Once rolling, the skater keeps gaining speed up to the auto push speed (8 m/s).", {{"physicsmode.autopushenabled", false, 1.0}}},
         {"Hard To Bail", "Much larger impacts are needed before a wipeout.",

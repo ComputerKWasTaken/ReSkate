@@ -31,6 +31,13 @@ struct Link {
     std::string_view drives; // lower-case id of a graph multiplier it scales
 };
 const std::vector<Link> &value_links();
+// How a built-in preset shows on the Tune tab: as a dial under `title` when its first rule is a
+// multiplier, and on which of the two short lists.
+struct PresetDial {
+    std::string_view title;
+    std::uint8_t modes{};
+};
+PresetDial preset_dial(std::string_view name);
 // Presets stack: each applies on top of what is already changed; Stock clears them.
 const std::vector<BuiltinPreset> &builtin_presets();
 } // namespace dingosdk::trainer

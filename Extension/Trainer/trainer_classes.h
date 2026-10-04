@@ -13,10 +13,10 @@ struct ClassField {
     const char *name;
     float stock;
     std::uint16_t offset;
-    // The game was seen reading it while a scripted skater rode, pushed, ollied, flipped, ran,
-    // jumped and sprinted (hardware read watches on every copy), or its effect was measured.
-    // False is not proof: values of moves the script does not do (grinds, vaults, climbing,
-    // hard impacts) were never asked for.
+    // The game was seen reading it (hardware read watches on every copy) while a scripted skater
+    // rode, pushed, ollied, flipped, ran, jumped and sprinted, or while a player ground, pumped,
+    // climbed, vaulted and bailed; or its effect was measured. False: no read turned up in any
+    // of that, and no other copy of the numbers was found in memory.
     bool seen;
 };
 struct ClassSpec {

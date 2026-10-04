@@ -8,16 +8,16 @@ telemetry HUD. It ships no game data: the list of values is built at run time fr
 
 | Tab | What you get |
 |---|---|
-| **TUNE** | An Essentials list of 21 plainly named values (ollie height, top speed, body flip and spin speed, grind lock-on...), then every plain value of the game's physics tuning (about 760), plus one multiplier for each of its 169 curves and graphs. Search, filter by group, "only what I changed", lock, reset. Changes apply while you skate. Values that no game code was found reading are hidden unless you ask for them. |
-| **PRESETS** | Quick switches for super high ollie, fast flips, fast spins and never bail, and height sliders for the no comply, the boneless and the hippy jump. Built-in presets you switch on and off, and that stack (Super Ollie, Fast Flips, Fast Spins, Realistic, Mega Pop, Fast, Hard To Bail, Sticky Grinds, ...), your own saved presets, and a preset a map applies every time it loads. |
+| **TUNE** | Three lists: REALISTIC, FUN and EVERYTHING. Each opens on the dials: every built-in preset as one slider (Ollie height, Push speed, Body flip and spin speed, Bail resistance, Grind lock-on and friction, on-foot jump and sprint, glide, torpedo), where 1 is the game's own and the preset's button jumps to the preset; then the switches (Auto Push, No Speed Wobble, Smooth Surfaces, Long Wheelbase, Never bail), the trick sliders (flip trick speed, no comply, boneless, hippy and off-board jump height) and the values themselves: a short plainly named list, or under EVERYTHING the whole table (the physics tuning's values, one multiplier per curve and graph, and the 314 values of the game's other tuning classes) with search, groups, "only what I changed", locks, your own saved presets and a preset a map applies every time it loads. Changes apply while you skate. Values the game was never found or seen reading are hidden unless you ask for them. **Reset everything**, above the tabs, puts the game back as it shipped. |
 | **PRACTICE** | Game speed and pause, five marker slots per map (save / go / clear), return to the marker after a bail, teleport to coordinates, copy your position (game or Blender axes). |
 | **MAP & HUD** | Speed and air-time HUD, a read-out after every jump (takeoff speed and angle, height, distance, drop, landing speed, spin and flip), telemetry recording to CSV, and whatever the map's author ships for the trainer. |
 
 Controller: hold **LB + RB**, then D-pad **up** saves the marker, **down** goes to it, **left / right**
 pick the slot.
 
-Everything is also a console command (`~`): `trainer open [tune|presets|practice|map]`, `trainer status`, `trainer set <id> <value>`,
-`trainer find <words>`, `trainer preset apply|remove <name>`, `trainer marker save|go|clear [slot]`,
+Everything is also a console command (`~`): `trainer open [tune|practice|map|realistic|fun|everything]`, `trainer status`, `trainer set <id> <value>`,
+`trainer find <words>`, `trainer preset apply|remove <name>`, `trainer dial <multiplier> <preset name>`,
+`trainer reset <id>|all|tricks|presets|everything`, `trainer marker save|go|clear [slot]`,
 `trainer tp <x> <y> <z>`, `trainer where`, `trainer jumps`, `trainer dump`, `trainer selftest`.
 
 ## For map makers: `trainer.json`

@@ -18,6 +18,7 @@ void register_trainer_commands(Commands &registry) {
         {"reset", "Put a value (or all) back to stock", "<value id>|all", false},
         {"find", "List tuning values whose id contains the words", "<words>", false},
         {"preset", "Apply, remove, save or delete a preset", "apply|remove|save|delete <name>", false},
+        {"dial", "Turn a built-in preset up or down: 1 is the game's own", "<multiplier> <preset name>", false},
         {"slot", "Select a marker slot", "<1-5>", false},
         {"marker", "Save, go to or clear a marker", "save|go|clear [slot]", false},
         {"tp", "Teleport the skater", "<x> <y> <z>", false},

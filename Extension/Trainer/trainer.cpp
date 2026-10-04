@@ -641,6 +641,62 @@ bool matches(const std::string &key, std::string_view pattern) {
     }
     return true;
 }
+// What each built-in preset's rules reach in the running game: (entry, rule) pairs, worked out
+// once per table of entries.
+const std::vector<std::vector<std::pair<std::size_t, std::size_t>>> &preset_targets() {
+    static std::vector<std::vector<std::pair<std::size_t, std::size_t>>> cache;
+    static const Entry *cached_for{};
+    static std::size_t cached_count{};
+    auto &s = state();
+    if (cached_for == s.entries.data() && cached_count == s.entries.size() && !cache.empty()) return cache;
+    cached_for = s.entries.data();
+    cached_count = s.entries.size();
+    const auto &presets = builtin_presets();
+    cache.assign(presets.size(), {});
+    for (std::size_t p = 0; p < presets.size(); ++p)
+        for (std::size_t r = 0; r < presets[p].rules.size(); ++r) {
+            const auto &rule = presets[p].rules[r];
+            for (std::size_t i = 0; i < s.entries.size(); ++i) {
+                const auto &e = s.entries[i];
+                const bool scale = e.kind == Kind::curve || e.kind == Kind::graph;
+                if (e.detail || scale != rule.curves || !matches(e.key, rule.pattern)) continue;
+                if (e.kind == Kind::flag && rule.multiply) continue;
+                cache[p].emplace_back(i, r);
+            }
+        }
+    return cache;
+}
+// A preset as a dial: `factor` is where its first value goes (x of stock); the others follow in
+// proportion, so 1 is the game's own and the first rule's amount is the preset as it ships.
+std::string apply_dial(std::string_view name, double factor) {
+    auto &s = state();
+    const auto &presets = builtin_presets();
+    const auto wanted = lower(name);
+    std::size_t p = 0;
+    while (p < presets.size() && lower(presets[p].name) != wanted) ++p;
+    if (p == presets.size()) return "error: no built-in preset is called \"" + std::string(name) + "\".";
+    const auto &rules = presets[p].rules;
+    if (rules.empty() || !rules[0].multiply || rules[0].amount <= 0 || rules[0].amount == 1)
+        return "error: " + std::string(presets[p].name) + " is a switch, not a dial.";
+    if (!(factor > 0) || !std::isfinite(factor)) return "error: a dial needs a multiplier above 0; 1 is the game's own.";
+    const double t = std::log(factor) / std::log(rules[0].amount);
+    std::size_t count{}, locked{};
+    for (const auto &[index, r] : preset_targets()[p]) {
+        auto &e = s.entries[index];
+        const auto &rule = rules[r];
+        if (is_locked(e)) {
+            ++locked;
+            continue;
+        }
+        if (rule.multiply) set_entry(e, rule.amount > 0 ? e.stock * std::pow(rule.amount, t) : e.stock * (1 + (rule.amount - 1) * t));
+        else set_entry(e, t > 0.01 ? rule.amount : e.stock); // a switch that goes with the preset's direction
+        ++count;
+    }
+    std::erase(s.active, std::string(presets[p].name));
+    if (std::abs(t - 1) < 1e-3) s.active.emplace_back(presets[p].name);
+    changed();
+    return std::format("{} x{:.2f}: {} values set{}.", presets[p].name, factor, count, locked ? std::format("; {} locked values left alone", locked) : "");
+}
 std::string remove_preset(std::string_view name) {
     auto &s = state();
     const auto wanted = lower(name);
@@ -998,7 +1054,8 @@ void observe(std::uintptr_t base, std::uintptr_t client, std::uint64_t now) {
     // How fast the board turns (flip tricks, shuvits): body 0's angular velocity (+0x90), read while a jump
     // is measured or telemetry is recorded.
     float board_turn = 0;
-    if (m.airborne || (s.logging && s.log)) {
+    bool turning = m.airborne || (s.logging && s.log);
+    if (turning) {
         try {
             const auto bodies = client_source::detail::debug_noclip_bodies(base, client, s.entity);
             std::array<float, 3> spin{};
@@ -1173,8 +1230,37 @@ void build_view() {
     }
     const auto is_active = [&](std::string_view name) { return std::ranges::find(s.active, name) != s.active.end(); };
     next->presets.push_back({"Stock", "Everything back to how this map loaded (frozen values stay).", true, s.active.empty() && !next->touched});
-    for (const auto &preset : builtin_presets())
-        next->presets.push_back({std::string(preset.name), std::string(preset.note), true, is_active(preset.name)});
+    {
+        // A built-in preset is on when the values say so, whatever switched them: a slider, a
+        // dial or another preset.
+        const auto &presets = builtin_presets();
+        const auto &targets = preset_targets();
+        for (std::size_t p = 0; p < presets.size(); ++p) {
+            const auto &preset = presets[p];
+            PresetRow row{std::string(preset.name), std::string(preset.note), true, false};
+            bool any = false, on = true;
+            const Entry *headline{};
+            for (const auto &[index, r] : targets[p]) {
+                const auto &e = s.entries[index];
+                const auto &rule = preset.rules[r];
+                if (!headline && r == 0) headline = &e;
+                const double expected = rule.multiply ? e.stock * rule.amount : rule.amount;
+                any = true;
+                // To the two decimals a dial shows: dragging one to the preset's number switches it on.
+                if (std::abs(e.value - sane(e, expected)) > 4e-3 * std::max(1e-3, std::abs(expected))) on = false;
+            }
+            row.active = any && on;
+            const auto dial = preset_dial(preset.name);
+            row.title = std::string(dial.title);
+            row.modes = dial.modes;
+            if (!preset.rules.empty() && preset.rules[0].multiply && headline && headline->stock != 0 && !dial.title.empty()) {
+                row.dial = true;
+                row.amount = preset.rules[0].amount;
+                row.factor = headline->value / headline->stock;
+            }
+            next->presets.push_back(std::move(row));
+        }
+    }
     for (const auto &[name, values] : s.user) next->presets.push_back({name, std::format("{} values", values.size()), false, is_active(name)});
     next->slot = s.slot;
     next->auto_return = s.auto_return;
@@ -1285,8 +1371,41 @@ std::string run(std::string_view verb, const std::vector<std::string> &a) {
     if (v == "set" || v == "freeze" || v == "reset") {
         if (v == "reset" && lower(arg(0)) == "all") {
             const auto count = reset_all();
+            std::size_t locked{};
+            for (const auto &e : s.entries) locked += e.touched;
             changed();
-            return std::format("{} values put back.", count);
+            return locked ? std::format("{} values put back; {} locked values kept (Reset everything clears those too).", count, locked)
+                          : std::format("{} values put back.", count);
+        }
+        if (v == "reset" && lower(arg(0)) == "tricks") {
+            s.hippy_height = s.nocomply_height = s.boneless_height = s.offboard_height = s.flip_speed = 1.0f;
+            changed();
+            return "Trick heights and flip trick speed are the game's own again.";
+        }
+        if (v == "reset" && lower(arg(0)) == "presets") {
+            const auto on = s.active;
+            for (const auto &name : on) (void)remove_preset(name);
+            s.active.clear();
+            changed();
+            return std::format("{} presets switched off.", on.size());
+        }
+        if (v == "reset" && lower(arg(0)) == "everything") {
+            // The game as it shipped: no lock survives, no preset stays on, no trick multiplier.
+            std::size_t count{};
+            for (auto &e : s.entries) e.frozen = false;
+            for (auto &e : s.entries) {
+                if (e.touched) {
+                    set_entry(e, e.stock);
+                    ++count;
+                } else {
+                    remember(e);
+                }
+            }
+            s.saved.clear();
+            s.active.clear();
+            s.hippy_height = s.nocomply_height = s.boneless_height = s.offboard_height = s.flip_speed = 1.0f;
+            changed();
+            return std::format("Everything is the game's own again: {} values put back, locks cleared, presets off, trick sliders at 1.", count);
         }
         auto *e = find_entry(arg(0));
         if (!e) return "error: no tuning value is called \"" + arg(0) + "\". Try: trainer find <text>";
@@ -1312,6 +1431,16 @@ std::string run(std::string_view verb, const std::vector<std::string> &a) {
         for (const auto &e : s.entries)
             if (matches(e.key, pattern) && ++count <= 12) result += std::format("{}{} = {:.6g}", result.empty() ? "" : "; ", e.id, e.value);
         return count ? std::format("{} match: {}{}", count, result, count > 12 ? "; ..." : "") : "Nothing matches.";
+    }
+    if (v == "dial") {
+        // trainer dial <multiplier> <built-in preset>
+        const auto factor = number(arg(0));
+        std::string name;
+        for (std::size_t i = 1; i < a.size(); ++i) name += (i > 1 ? " " : "") + a[i];
+        if (!factor || name.empty()) return "error: usage: trainer dial <multiplier> <preset name>";
+        std::string why;
+        if (!editable(&why)) return "error: " + why;
+        return apply_dial(name, *factor);
     }
     if (v == "preset") {
         const auto action = lower(arg(0));
