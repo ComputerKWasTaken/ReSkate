@@ -445,7 +445,7 @@ bool queue_command(std::string_view action, std::string_view argument, std::stri
          action != "voice" && action != "voice-mute" &&
          action != "voice-volume" && action != "voice-allow" && action != "voice-range" && action != "chat" && action != "ban" && action != "unban" &&
          action != "world-layer-sync" && action != "noclip-allow" && action != "nobail-allow" && action != "boosts-allow" &&
-         action != "tp" &&
+         action != "tuning-enforce" && action != "tp" &&
          action != "tpall" && action != "tphere" && action != "browse" &&
          action != "server" && action != "party") ||
         argument.size() > (action == "host" || action == "host-config" ? 160U : action == "chat" ? 4 * multiplayer_chat_max_bytes

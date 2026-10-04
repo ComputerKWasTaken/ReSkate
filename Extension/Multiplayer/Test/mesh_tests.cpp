@@ -389,6 +389,16 @@ void join_tick_checks() {
         check(queue_command("party", "status", {}), "A party request was not queued");
         tick(0, 0, true, map, nullptr);
         check(guest.requests.empty(), "A queued party request was not run");
+        // So do the host's switches in both menus: each has to be let into the queue. The
+        // physics tuning one was left out, and its switch did nothing in either menu.
+        for (const char *setting : {"object-placement", "noclip-allow", "nobail-allow", "boosts-allow", "tuning-enforce",
+                                    "world-layer-sync", "clear-objects"}) {
+            const bool queued = queue_command(setting, "toggle", {});
+            if (!queued) std::cerr << "Refused: " << setting << "\n";
+            check(queued, "A menu's host setting was refused before it reached the session");
+            tick(0, 0, true, map, nullptr);
+            check(guest.requests.empty(), "A queued host setting was not run");
+        }
         if (friend_join) {
             check(queue_command("join-friend-lobby", "9002", {}), "Steam friend join request should enter the normal queue");
             tick(0, 0, true, map, nullptr);
@@ -839,6 +849,13 @@ void tick_settings_checks() {
     }
     (void)command("host", "code 8 120 is a lobby name");
     check(configured.tps == 30 && configured.lobby_name == "120 is a lobby name", "Legacy host command changed meaning");
+    // Whose physics guests skate with is the host's to switch, and is remembered for next time.
+    check(configured.enforce_tuning, "A new lobby did not start with the host's physics for everyone");
+    (void)command("tuning-enforce", "off");
+    check(!configured.enforce_tuning && !configured.host_preferences.enforce_tuning && configured.roster_dirty,
+          "The host could not let guests skate with their own physics");
+    (void)command("tuning-enforce", "toggle");
+    check(configured.enforce_tuning && configured.host_preferences.enforce_tuning, "The host could not switch its physics for everyone back on");
     stop(configured, "TPS fixture complete");
 }
 void pacing_checks() {
