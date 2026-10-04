@@ -1,4 +1,5 @@
 #pragma once
+#include "Engine/Vfs/mod_music.h"
 #include "Extension/Profile/runtime_internal.h"
 
 namespace dingosdk::profile_runtime {
@@ -27,6 +28,9 @@ struct MusicAssetFunctions {
 MusicAssetFunctions& music_asset_functions();
 
 bool music_asset_type(std::uintptr_t asset, std::uintptr_t vtable_rva);
+
+// Playlists the enabled mods declare in reskate-music.json (see Engine/Vfs/mod_music.h).
+std::vector<mods::MusicPlaylist> mod_music_playlists();
 
 bool read_music_catalog(MusicCatalog& result);
 }
