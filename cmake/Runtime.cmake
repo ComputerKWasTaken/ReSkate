@@ -87,6 +87,7 @@ add_library(dingosdk_runtime SHARED
     Extension/Assets/native_render_resource_pool.cpp
     Extension/World/native_entity_pages.cpp
     Extension/Rendering/display_startup.cpp
+    Extension/Rendering/replay_export.cpp
     Engine/Game/World/world_model.cpp
     Extension/World/level_loading.cpp
     Extension/World/loading_screen.cpp
