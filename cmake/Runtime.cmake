@@ -107,6 +107,11 @@ add_library(dingosdk_runtime SHARED
     Extension/Skater/physics_tuning.cpp
     Extension/Multiplayer/Remote/remote_collision.cpp
     Extension/Skater/physics_tuning_model.cpp
+    Extension/Trainer/trainer.cpp
+    Extension/Trainer/trainer_presets.cpp
+    Extension/Trainer/trainer_jump.cpp
+    Extension/Trainer/trainer_classes.cpp
+    Extension/Trainer/trainer_commands.cpp
     Extension/Skater/offboard_flight.cpp
     Extension/Skater/camera_observer.cpp
     Extension/Boot/offline_boot.cpp
