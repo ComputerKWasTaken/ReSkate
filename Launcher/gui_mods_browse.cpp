@@ -137,12 +137,6 @@ std::string count_text(std::uint64_t value) {
     return std::to_string(value);
 }
 
-std::string size_text(std::uint64_t bytes) {
-    if (bytes >= 1024ull * 1024 * 1024) return std::format("{:.2f} GB", static_cast<double>(bytes) / (1024.0 * 1024 * 1024));
-    if (bytes >= 1024ull * 1024) return std::format("{:.0f} MB", static_cast<double>(bytes) / (1024.0 * 1024));
-    return std::format("{} KB", std::max<std::uint64_t>(1, bytes / 1024));
-}
-
 std::string date_text(const std::string& iso) { return iso.substr(0, std::min<std::size_t>(iso.size(), 10)); }
 
 void set_activity(ModsPanel& panel, std::string text) {
@@ -250,6 +244,12 @@ void mod_icon(ModsPanel& panel, const thunderstore::Package* package, ImVec2 pos
         draw->AddImageRounded(id, position, end, ImVec2(0, 0), ImVec2(1, 1), IM_COL32_WHITE, S(4));
     else
         draw->AddRectFilled(position, end, rgba(255, 255, 255, 0.06f), S(4));
+}
+
+std::string size_text(std::uint64_t bytes) {
+    if (bytes >= 1024ull * 1024 * 1024) return std::format("{:.2f} GB", static_cast<double>(bytes) / (1024.0 * 1024 * 1024));
+    if (bytes >= 1024ull * 1024) return std::format("{:.0f} MB", static_cast<double>(bytes) / (1024.0 * 1024));
+    return std::format("{} KB", std::max<std::uint64_t>(1, bytes / 1024));
 }
 
 void refresh_listing(ModsPanel& panel, double time, bool force) {
@@ -569,8 +569,9 @@ void browse_page(Launcher& launcher, const Fonts& fonts, ModsPanel& panel, float
         draw->AddText(fonts.body, fonts.body->FontSize, ImVec2(text_x, start.y + S(32)), color::text, line.c_str(),
             nullptr, 0, &clip);
         draw->AddText(fonts.caption, fonts.caption->FontSize, ImVec2(text_x, start.y + S(55)), color::muted,
-            std::format("v{}  /  {} downloads  /  {}", version.number, count_text(package.downloads),
-                date_text(package.date_updated)).c_str());
+            std::format("v{}{}  /  {} downloads  /  {}", version.number,
+                version.file_size ? "  /  " + size_text(version.file_size) : std::string(),
+                count_text(package.downloads), date_text(package.date_updated)).c_str());
         ImGui::PopID();
     });
     ImGui::EndDisabled();

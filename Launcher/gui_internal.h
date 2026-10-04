@@ -379,6 +379,9 @@ struct ModsPanel {
     bool scanned{};
     fs::path root;
     mods::ModList list;
+    // What each installed mod's folder holds on disk, by folder name; measured
+    // when the folder is scanned.
+    std::map<std::string, std::uint64_t, std::less<>> sizes;
     int selected{-1};                    // the mod whose overview is open
     bool overview{};                     // the overview popup is showing
     int tab{};                           // 0 MY MODS, 1 GET MODS
@@ -414,6 +417,8 @@ void start_install(ModsPanel& panel, const fs::path& source, bool replace);
 
 // ---------------------------------------------------------------- Thunderstore (gui_mods_browse.cpp)
 
+// "1.27 GB", "263 MB", "12 KB": a mod's size, on both pages.
+std::string size_text(std::uint64_t bytes);
 // Starts a listing fetch when none ran yet, or when `force`.
 void refresh_listing(ModsPanel& panel, double time, bool force = false);
 // Takes over a fetch the worker finished; call once a frame.

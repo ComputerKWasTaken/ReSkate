@@ -80,9 +80,28 @@ fs::path pick(HWND owner, bool folder) {
     return result;
 }
 
-std::string summary(const mods::Mod& mod) {
+// Everything in the mod's folder, as Explorer would count it. The game's merged
+// patch hard links a mod's archives rather than copying them, so this is also
+// what removing the mod gives back.
+std::uint64_t folder_size(const fs::path& directory) {
+    std::uint64_t total{};
+    std::error_code error;
+    for (fs::recursive_directory_iterator it(directory, fs::directory_options::skip_permission_denied, error), end;
+         it != end && !error; it.increment(error)) {
+        std::error_code ignored;
+        if (it->is_regular_file(ignored) && !ignored) {
+            const auto size = it->file_size(ignored);
+            if (!ignored) total += size;
+        }
+    }
+    return total;
+}
+
+std::string summary(const ModsPanel& panel, const mods::Mod& mod) {
     std::vector<std::string> parts;
     if (!mod.version.empty()) parts.push_back("v" + mod.version);
+    if (const auto size = panel.sizes.find(mod.name); size != panel.sizes.end() && size->second)
+        parts.push_back(size_text(size->second));
     if (!mod.author.empty()) parts.push_back("by " + mod.author);
     if (!mod.levels.empty()) parts.push_back(mod.levels.size() == 1 ? "1 map" : std::to_string(mod.levels.size()) + " maps");
     else if (mod.provides_layout) parts.push_back("game data");
@@ -169,7 +188,7 @@ void installed_row(const Fonts& fonts, ModsPanel& panel, const thunderstore::Ins
     const auto title = std::to_string(index + 1) + ".  " + mod.title;
     draw->AddText(fonts.bold, fonts.bold->FontSize, ImVec2(text_x, start.y + S(16)),
         entry.enabled ? color::text : color::muted, title.c_str());
-    if (const auto detail = summary(mod); !detail.empty())
+    if (const auto detail = summary(panel, mod); !detail.empty())
         draw->AddText(fonts.body, fonts.body->FontSize, ImVec2(text_x, start.y + S(40)), color::muted, detail.c_str());
 
     // The widgets that sit on the row, over its Selectable.
@@ -316,7 +335,7 @@ void mod_overview(const Fonts& fonts, ModsPanel& panel, const thunderstore::Inst
     ImGui::TextUnformatted(mod.title.c_str());
     ImGui::PopTextWrapPos();
     ImGui::PopFont();
-    ImGui::TextDisabled("%s", summary(mod).c_str());
+    ImGui::TextDisabled("%s", summary(panel, mod).c_str());
     ImGui::Spacing();
     if (update) {
         ImGui::BeginDisabled(installing);
@@ -463,6 +482,8 @@ void refresh_mods(Launcher& launcher, ModsPanel& panel) {
 void scan(ModsPanel& panel, const launcher_app::Session& session) {
     panel.root = launcher_mods::mods_root(session.paths.directory);
     panel.list = mods::scan_mods(panel.root.parent_path());
+    panel.sizes.clear();
+    for (const auto& entry : panel.list.entries) panel.sizes[entry.mod.name] = folder_size(entry.mod.directory);
     panel.scanned = true;
     if (panel.selected >= static_cast<int>(panel.list.entries.size())) panel.selected = -1;
 }
