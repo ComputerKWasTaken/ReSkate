@@ -32,7 +32,9 @@ std::uint64_t nonce() {
     std::ifstream urandom("/dev/urandom", std::ios::binary);
     if (urandom.read(reinterpret_cast<char *>(&value), sizeof(value)) && value) return value;
     std::random_device device;
-    for (int i = 0; i < 4 && !value; ++i)
+    // Four rounds of sixteen bits each. Stopping as soon as `value` was
+    // non-zero would leave a session code with sixteen bits of entropy.
+    for (int i = 0; i < 4; ++i)
         value = (value << 16) ^ static_cast<std::uint64_t>(device() & 0xFFFF);
     if (!value) throw std::runtime_error("Cannot generate a session code.");
 #endif

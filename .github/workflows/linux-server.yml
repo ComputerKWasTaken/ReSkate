@@ -56,8 +56,14 @@ jobs:
         run: |
           set -eux
           mkdir -p build/steamlibs
+          # Pinned and hashed: this library is loaded into the server, and a
+          # branch name is whatever that branch holds on the day CI runs. Both
+          # values also live in contrib/setup-linux-server-libs.sh.
+          SDK_COMMIT=df2baabf574a738ef1ea90a7e89339107fc0a279
+          SDK_SHA256=eb2dd015b84177cf4f4326fe578aab375fd8931bbbd719c7492420d9777007fe
           curl -fSL --retry 3 -o build/steamlibs/libsteam_api.so \
-            "https://raw.githubusercontent.com/rlabrecque/SteamworksSDK/main/redistributable_bin/linux64/libsteam_api.so"
+            "https://raw.githubusercontent.com/rlabrecque/SteamworksSDK/$SDK_COMMIT/redistributable_bin/linux64/libsteam_api.so"
+          echo "$SDK_SHA256  build/steamlibs/libsteam_api.so" | sha256sum -c -
           test "$(stat -c%s build/steamlibs/libsteam_api.so)" -gt 100000
           nm -D --defined-only build/steamlibs/libsteam_api.so \
             | grep "SteamAPI_SteamGameServerNetworkingSockets_SteamAPI_v01" > /dev/null

@@ -11,19 +11,26 @@
 #
 # Defaults:
 #   --server-dir: directory containing ReSkateServer (or current directory)
-#   --sdk-url:   https://raw.githubusercontent.com/rlabrecque/SteamworksSDK/main/redistributable_bin/linux64/libsteam_api.so
-#                (public SDK mirror, Valve binaries; official source: partner.steamgames.com)
+#   --sdk-url:   the pinned SDK mirror below (Valve binaries; official source:
+#                partner.steamgames.com). Pinned to a commit and checked
+#                against SDK_SHA256, because this library is loaded into the
+#                server: a branch name is whatever that branch holds today.
 set -euo pipefail
 
 SERVER_DIR=""
-SDK_URL="https://raw.githubusercontent.com/rlabrecque/SteamworksSDK/main/redistributable_bin/linux64/libsteam_api.so"
+# Mirror commit df2baabf574a, libsteam_api.so 385840 bytes.
+SDK_COMMIT="df2baabf574a738ef1ea90a7e89339107fc0a279"
+SDK_URL="https://raw.githubusercontent.com/rlabrecque/SteamworksSDK/$SDK_COMMIT/redistributable_bin/linux64/libsteam_api.so"
+# Empty, or --sdk-url given, skips the hash check: pass --sdk-sha256 to keep it.
+SDK_SHA256="eb2dd015b84177cf4f4326fe578aab375fd8931bbbd719c7492420d9777007fe"
 FORCE=0
 NO_STEAMCLIENT=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --server-dir) SERVER_DIR="${2:?missing DIR}"; shift 2 ;;
-        --sdk-url) SDK_URL="${2:?missing URL}"; shift 2 ;;
+        --sdk-url) SDK_URL="${2:?missing URL}"; SDK_SHA256=""; shift 2 ;;
+        --sdk-sha256) SDK_SHA256="${2:?missing SHA256}"; shift 2 ;;
         --force) FORCE=1; shift ;;
         --no-steamclient) NO_STEAMCLIENT=1; shift ;;
         -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
@@ -52,6 +59,19 @@ else
     if [ "$(wc -c <"$tmp")" -lt 100000 ]; then echo "error: download looks wrong ($(wc -c <"$tmp") bytes)" >&2; rm -f "$tmp"; exit 2; fi
     if command -v nm >/dev/null && ! nm -D --defined-only "$tmp" 2>/dev/null | grep "SteamAPI_SteamGameServerNetworkingSockets_SteamAPI_v01" >/dev/null; then
         echo "error: downloaded file has no game-server sockets export" >&2; rm -f "$tmp"; exit 2
+    fi
+    # The size and export checks above catch a wrong file, not a swapped one.
+    if [ -n "$SDK_SHA256" ]; then
+        command -v sha256sum >/dev/null || { echo "error: sha256sum is required" >&2; rm -f "$tmp"; exit 2; }
+        got="$(sha256sum "$tmp" | cut -d' ' -f1)"
+        if [ "$got" != "$SDK_SHA256" ]; then
+            echo "error: libsteam_api.so does not match the expected hash" >&2
+            echo "  expected $SDK_SHA256" >&2
+            echo "  got      $got" >&2
+            echo "  (a newer mirror commit needs --sdk-sha256 with its hash)" >&2
+            rm -f "$tmp"; exit 2
+        fi
+        echo "Verified libsteam_api.so against its expected hash."
     fi
     cp "$tmp" "$SERVER_DIR/libsteam_api.so"
     chmod 644 "$SERVER_DIR/libsteam_api.so"
