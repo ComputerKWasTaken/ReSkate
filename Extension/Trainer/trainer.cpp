@@ -83,6 +83,7 @@ struct Motion {
     bool axes_valid{};
     Vec3 forward{}, up{};
     float spin{}, spin_rate{}, flip{};
+    float board_turn{}; // the board's fastest turn rate in this jump, degrees per second
     std::uint32_t air_state{}, ground_state{};
 };
 struct State {
@@ -111,6 +112,8 @@ struct State {
     float hippy_height{1};
     // An on-foot jump: the same scaling, when a skater standing off the board starts to rise.
     float offboard_height{1};
+    // Board flip tricks: a multiplier on the game's flip speed curves (trainer_classes.h).
+    float flip_speed{1};
     bool offboard_grounded{}; // off the board and not moving up or down at the last tick
     const char *boost_name{""};
     // The no comply and the boneless are launched by the trick scripts too (trainer_jump.cpp).
@@ -222,6 +225,7 @@ void load_store() {
             s.hippy_height = std::clamp(o.value("hippy_height", 1.0f), height_low, height_high);
             s.nocomply_height = std::clamp(o.value("nocomply_height", 1.0f), height_low, height_high);
             s.offboard_height = std::clamp(o.value("offboard_height", 1.0f), height_low, height_high);
+            s.flip_speed = std::clamp(o.value("flip_speed", 1.0f), 0.1f, 3.0f);
             s.boneless_height = std::clamp(o.value("boneless_height", 1.0f), height_low, height_high);
             s.slot = std::clamp(o.value("slot", 0), 0, static_cast<int>(marker_slots) - 1);
         }
@@ -267,6 +271,7 @@ void save_store() {
         options["hippy_height"] = s.hippy_height;
         options["nocomply_height"] = s.nocomply_height;
         options["offboard_height"] = s.offboard_height;
+        options["flip_speed"] = s.flip_speed;
         options["boneless_height"] = s.boneless_height;
         options["slot"] = s.slot;
         json["options"] = std::move(options);
@@ -422,6 +427,16 @@ void set_entry(Entry &e, double value) {
             }
     }
 }
+// A value a locked linked value drives (its graphs, the push class's speeds) is locked with it:
+// resetting it alone would leave the lock showing a number that no longer does anything.
+bool is_locked(const Entry &e) {
+    if (e.frozen) return true;
+    auto &s = state();
+    const auto index = static_cast<std::size_t>(&e - s.entries.data());
+    return std::ranges::any_of(s.entries, [&](const Entry &other) {
+        return other.frozen && std::ranges::find(other.drives, index) != other.drives.end();
+    });
+}
 Entry *find_entry(std::string_view id) {
     auto &s = state();
     const auto found = s.index.find(lower(id));
@@ -497,7 +512,7 @@ void build_entries() {
             e.group = class_specs[c].group;
             e.label = spaced(field.name);
             e.kind = Kind::real;
-            e.used = true;
+            e.used = field.seen;
             e.class_field = static_cast<int>(class_specs[c].first + i);
             e.stock = e.value = field.stock;
             s.index.emplace(e.key, s.entries.size());
@@ -632,7 +647,7 @@ std::string remove_preset(std::string_view name) {
     std::size_t count{};
     std::string removed;
     const auto put_back = [&](Entry &e) {
-        if (e.frozen) return;
+        if (is_locked(e)) return;
         if (e.touched) {
             set_entry(e, e.stock);
             ++count;
@@ -640,7 +655,7 @@ std::string remove_preset(std::string_view name) {
         }
         // A linked value at stock whose graphs were set directly (by an older version's preset).
         for (const auto index : e.drives)
-            if (auto &target = s.entries[index]; target.touched && !target.frozen) {
+            if (auto &target = s.entries[index]; target.touched && !is_locked(target)) {
                 set_entry(target, target.stock);
                 ++count;
             }
@@ -676,7 +691,7 @@ std::size_t reset_all() {
     auto &s = state();
     std::size_t count{};
     for (auto &e : s.entries) {
-        if (e.frozen || !e.touched) continue;
+        if (!e.touched || is_locked(e)) continue;
         set_entry(e, e.stock);
         ++count;
     }
@@ -696,14 +711,14 @@ std::string apply_preset(std::string_view name) {
     if (wanted == "map") {
         if (s.map_file.preset.empty()) return "error: this map ships no trainer preset.";
         for (const auto &[id, value] : s.map_file.preset)
-            if (auto *e = find_entry(id); e && !e->frozen) { set_entry(*e, value); ++count; }
+            if (auto *e = find_entry(id); e && !is_locked(*e)) { set_entry(*e, value); ++count; }
         applied = s.map_file.preset_name.empty() ? "Map preset" : s.map_file.preset_name;
     }
     if (applied.empty())
         for (const auto &[user_name, values] : s.user) {
             if (lower(user_name) != wanted) continue;
             for (const auto &[key, value] : values)
-                if (auto *e = find_entry(key); e && !e->frozen) { set_entry(*e, value); ++count; }
+                if (auto *e = find_entry(key); e && !is_locked(*e)) { set_entry(*e, value); ++count; }
             applied = user_name;
             break;
         }
@@ -715,7 +730,7 @@ std::string apply_preset(std::string_view name) {
                     const bool scale = e.kind == Kind::curve || e.kind == Kind::graph;
                     if (e.detail || scale != rule.curves || !matches(e.key, rule.pattern)) continue;
                     if (e.kind == Kind::flag && rule.multiply) continue;
-                    if (e.frozen) {
+                    if (is_locked(e)) {
                         ++locked;
                         continue;
                     }
@@ -843,15 +858,16 @@ void finish_jump(const Vec3 &landing, float landing_speed, std::int64_t landed_a
     jump.spin = std::abs(m.spin);
     jump.spin_rate = m.spin_rate;
     jump.flip = m.flip;
+    jump.board_turn = m.board_turn;
     jump.state = m.air_state;
     s.telemetry.last = jump;
     if (jump.distance > s.telemetry.best.distance) s.telemetry.best = jump;
     say(logging::Level::info,
         std::format("Trainer jump {}: takeoff {:.1f} km/h at {:.1f} deg, air {:.2f} s, height {:.2f} m, distance {:.2f} m, drop {:.2f} m, "
                     "landing {:.1f} km/h at ({:.1f}, {:.1f}, {:.1f}); spin {:.0f} deg (peak {:.0f} deg/s), flip {:.0f} deg, "
-                    "states {}>{}.",
+                    "board {:.0f} deg/s, states {}>{}.",
                     jump.serial, jump.takeoff_speed * 3.6f, jump.takeoff_angle, jump.air_time, jump.height, jump.distance, jump.drop,
-                    jump.landing_speed * 3.6f, landing[0], landing[1], landing[2], jump.spin, jump.spin_rate, jump.flip, m.ground_state,
+                    jump.landing_speed * 3.6f, landing[0], landing[1], landing[2], jump.spin, jump.spin_rate, jump.flip, jump.board_turn, m.ground_state,
                     m.air_state));
 }
 void observe(std::uintptr_t base, std::uintptr_t client, std::uint64_t now) {
@@ -956,7 +972,7 @@ void observe(std::uintptr_t base, std::uintptr_t client, std::uint64_t now) {
     m.axes_valid = true;
     if (!flying && watch.valid) m.ground_state = watch.state;
     if (flying && !m.airborne) {
-        m.spin = m.spin_rate = m.flip = 0;
+        m.spin = m.spin_rate = m.flip = m.board_turn = 0;
         m.air_state = watch.state;
         m.airborne = true;
         m.takeoff = m.position;
@@ -979,9 +995,23 @@ void observe(std::uintptr_t base, std::uintptr_t client, std::uint64_t now) {
     m.velocity = velocity;
     m.position = position;
     m.stamp = stamp;
+    // How fast the board turns (flip tricks, shuvits): body 0's angular velocity (+0x90), read while a jump
+    // is measured or telemetry is recorded.
+    float board_turn = 0;
+    if (m.airborne || (s.logging && s.log)) {
+        try {
+            const auto bodies = client_source::detail::debug_noclip_bodies(base, client, s.entity);
+            std::array<float, 3> spin{};
+            if (!bodies.parts.empty() && memory::peek(bodies.parts[0] + 0x90, spin)) {
+                board_turn = std::sqrt(spin[0] * spin[0] + spin[1] * spin[1] + spin[2] * spin[2]) * 180.0f / std::numbers::pi_v<float>;
+                if (!std::isfinite(board_turn) || board_turn > 1.0e5f) board_turn = 0;
+            }
+        } catch (...) {}
+        if (m.airborne) m.board_turn = std::max(m.board_turn, board_turn);
+    }
     if (s.logging && s.log) {
-        s.log << std::format("{:.4f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.1f},{},{}\n", clock_seconds(stamp - s.log_start), position[0],
-                             position[1], position[2], t.speed, t.vertical, t.heading, t.airborne ? 1 : 0, t.physics_state);
+        s.log << std::format("{:.4f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.1f},{},{},{:.0f}\n", clock_seconds(stamp - s.log_start), position[0],
+                             position[1], position[2], t.speed, t.vertical, t.heading, t.airborne ? 1 : 0, t.physics_state, board_turn);
     }
     // A bail: back to the selected marker once the skater has had time to fall.
     if (watch.valid && (!s.wipeouts_known || watch.wipeouts != s.seen_wipeouts)) {
@@ -1012,7 +1042,7 @@ void set_logging(bool on) {
                                               time.wMinute, time.wSecond);
     s.log.open(file, std::ios::binary | std::ios::trunc);
     if (!s.log) return;
-    s.log << "seconds,x,y,z,speed_mps,vertical_mps,heading_deg,airborne,physics_state\n";
+    s.log << "seconds,x,y,z,speed_mps,vertical_mps,heading_deg,airborne,physics_state,board_turn_dps\n";
     s.log_start = clock_now();
     s.logging = true;
 }
@@ -1151,6 +1181,7 @@ void build_view() {
     next->hippy_height = s.hippy_height;
     next->nocomply_height = s.nocomply_height;
     next->offboard_height = s.offboard_height;
+    next->flip_speed = s.flip_speed;
     next->boneless_height = s.boneless_height;
     next->return_delay = s.return_delay;
     next->pad_shortcuts = s.pad_shortcuts;
@@ -1216,6 +1247,7 @@ void tick(std::uintptr_t base, std::uintptr_t client, bool playing, const std::s
             for (auto &e : s.entries)
                 if (e.class_field >= 0) want_class_value(static_cast<std::size_t>(e.class_field), static_cast<float>(e.touched && !stock ? e.value : e.stock));
         }
+        want_flip_speed((!multiplayer_session_active() || session_boosts_allowed()) && editable() ? s.flip_speed : 1.0f);
         (void)apply_classes();
         // Like the hippy jump's, these are boosts: a session that turns boosts off turns them off.
         const bool boosts = !multiplayer_session_active() || session_boosts_allowed();
@@ -1362,7 +1394,11 @@ std::string run(std::string_view verb, const std::vector<std::string> &a) {
     if (v == "option") {
         const auto name = lower(arg(0));
         bool on{};
-        if (name == "hippy_height" || name == "nocomply_height" || name == "boneless_height" || name == "offboard_height") {
+        if (name == "flip_speed") {
+            const auto value = number(arg(1));
+            if (!value) return "error: flip_speed needs a multiplier, 1 = the game's own speed.";
+            s.flip_speed = std::clamp(static_cast<float>(*value), 0.1f, 3.0f);
+        } else if (name == "hippy_height" || name == "nocomply_height" || name == "boneless_height" || name == "offboard_height") {
             const auto value = number(arg(1));
             if (!value) return "error: " + name + " needs a multiplier, 1 = the game's own height.";
             (name == "hippy_height" ? s.hippy_height : name == "nocomply_height" ? s.nocomply_height : name == "offboard_height" ? s.offboard_height : s.boneless_height) =

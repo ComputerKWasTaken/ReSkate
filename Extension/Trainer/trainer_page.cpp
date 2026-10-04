@@ -30,8 +30,8 @@ struct Page {
     std::array<char, 49> preset_name{};
     std::array<float, 3> teleport{};
     double speed_edit{-1}, speed_until{};
-    float hippy_edit{1}, nocomply_edit{1}, boneless_edit{1}, offboard_edit{1};
-    bool hippy_editing{}, nocomply_editing{}, boneless_editing{}, offboard_editing{};
+    float hippy_edit{1}, nocomply_edit{1}, boneless_edit{1}, offboard_edit{1}, flip_edit{1};
+    bool hippy_editing{}, nocomply_editing{}, boneless_editing{}, offboard_editing{}, flip_editing{};
     std::uint64_t open_serial{}; // the last `trainer open` acted on
     bool show_page{};
 };
@@ -109,7 +109,7 @@ void value_row(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const tra
     if (tinted) ImGui::PopStyleColor();
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("%s\nStock: %s%s", row.id.c_str(), number(row.stock).c_str(),
-            row.used ? "" : "\nNo game code was found reading this value, so changing it will probably do nothing.");
+            row.used ? "" : "\nThe game was not found (or seen) reading this value, so changing it may do nothing.");
     ImGui::SameLine(column);
     const float reset = ImGui::CalcTextSize("Reset").x + ImGui::GetStyle().FramePadding.x * 2;
     ImGui::BeginDisabled(!view.editable || !callbacks.queue_console_command);
@@ -250,12 +250,12 @@ void tune_tab(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const trai
 }
 
 void trick_heights(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const trainer::View &view) {
-    begin_card(menu, "trick-heights", "TRICK HEIGHTS", "1.0 is the game's own height");
-    const auto slider = [&](const char *label, const char *option, float value, float &edit, bool &editing) {
+    begin_card(menu, "trick-heights", "TRICKS", "1.0 is the game's own");
+    const auto slider = [&](const char *label, const char *option, float value, float &edit, bool &editing, float high = 50.0f) {
         field(menu, label);
         ImGui::PushID(option);
         float shown = editing ? edit : value;
-        if (ImGui::SliderFloat("##height", &shown, 0.1f, 50.0f, "x %.2f", ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_Logarithmic)) {
+        if (ImGui::SliderFloat("##height", &shown, 0.1f, high, "x %.2f", ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_Logarithmic)) {
             edit = shown;
             editing = true;
         }
@@ -263,11 +263,13 @@ void trick_heights(SkateMenu &menu, const CallbacksV3 &callbacks, Page &p, const
         if (!ImGui::IsItemActive() && editing && std::abs(value - edit) < 0.005f) editing = false;
         ImGui::PopID();
     };
+    slider("Flip trick speed", "flip_speed", view.flip_speed, p.flip_edit, p.flip_editing, 3.0f);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Slows board flips. Above 1 the game's own limit on how fast a board turns takes over.");
     slider("No comply height", "nocomply_height", view.nocomply_height, p.nocomply_edit, p.nocomply_editing);
     slider("Boneless height", "boneless_height", view.boneless_height, p.boneless_edit, p.boneless_editing);
     slider("Hippy jump height", "hippy_height", view.hippy_height, p.hippy_edit, p.hippy_editing);
     slider("Off-board jump height", "offboard_height", view.offboard_height, p.offboard_edit, p.offboard_editing);
-    note("Separate from ollie height because the game sets these in its trick scripts. Ctrl+click a slider to type a number.");
+    note("Not tuning values: the game sets these in its trick scripts and flip curves. Ctrl+click a slider to type a number.");
     end_card();
 }
 void presets_tab(SkateMenu &menu, const Model &model, const CallbacksV3 &callbacks, Page &p, const trainer::View &view) {

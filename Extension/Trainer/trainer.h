@@ -68,6 +68,7 @@ struct View {
     // The same for the no comply and the boneless.
     float nocomply_height{1}, boneless_height{1};
     float offboard_height{1}; // a jump on foot
+    float flip_speed{1};      // board flip tricks: x of the game's own speed
     // HUD
     bool hud{}, hud_jump{true}, logging{};
     // The loaded map and what its author ships for the trainer (Mods/<mod>/trainer.json).
@@ -83,6 +84,7 @@ struct Jump {
     float takeoff_speed{}, takeoff_angle{}, air_time{}, height{}, distance{}, drop{}, landing_speed{};
     float spin{}, spin_rate{}; // degrees turned about the vertical in the air, and the fastest rate (deg/s)
     float flip{};              // degrees the skater's up axis tumbled (body flips and rolls)
+    float board_turn{};        // the board's fastest turn rate, degrees per second (flip tricks, shuvits)
     std::uint32_t state{};     // the physics state it took off into (tells trick kinds apart)
     std::array<float, 3> takeoff{}, landing{};
 };

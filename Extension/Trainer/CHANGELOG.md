@@ -28,8 +28,25 @@ Built on ReSkate 1.0.7.
 - Trick height sliders go from x0.1 to x50 (Ctrl+click to type); the console takes 0.05 to 100.
 - Return after a bail no longer ignores the first bail of a session, and says in the log what
   it did. (The switch is on the Practice tab.)
-- Not done: the speed of board flip tricks. The game keeps it in curves the trainer cannot
-  reach yet.
+- **Flip trick speed** (the TRICKS card). The game keeps board flip speed in eight curves; the
+  trainer finds them and scales the four speed curves. It slows flips (x0.4: a kickflip turns at
+  about 950 deg/s instead of 1300 to 1400); above 1 the game's own limit on how fast a board
+  turns takes over, so the slider stops at x3.
+- **Evidence behind every class value.** A scripted skater rode, pushed, ollied, flipped, did no
+  complies and bonelesses, ran, jumped and sprinted while hardware read watches sat on every copy
+  of each of the 314 values: the game read 187. The rest (grind control, pumping, climbing,
+  vaults, hard impacts: moves the script does not do) are marked "no use found" and hidden unless
+  asked for, like the tuning asset's unread values.
+- **A locked value keeps what it drives.** Stock and Reset all used to leave a locked ollie
+  height showing its number while resetting the graphs behind it.
+- The jump read-out, the log and the telemetry CSV carry the board's fastest turn rate.
+- Checked by measurement, with a scripted controller: push speed (x2 cruises at 8.2 m/s, the
+  Realistic preset at 3.0), auto push, ollie height, Mega Pop (0.39 to 0.79 m), Fast Spins, no
+  comply and boneless heights, on-foot jump (Moon Jump 0.9 to 2.6 m), sprint (Fast On Foot 6.6
+  to 9.8 m/s), flip trick speed, game speed (0.5x doubles an ollie's air time), markers and
+  their pad shortcuts, teleport. No effect could be measured for the speed wobble start speed
+  (heading at 7.5 m/s) or the sideways bail limit (0.01 did not cause a bail); spread-eagle,
+  torpedo, on-foot flips, grinds, bails and return-after-bail were not reached by the script.
 
 ## v0.1.4 - 2026-10-03
 
