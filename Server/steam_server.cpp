@@ -1,4 +1,5 @@
 #include "steam_server.h"
+#include "server_text.h"
 #include "Extension/Multiplayer/Net/protocol.h"
 #ifdef _WIN32
 #include <Windows.h>
@@ -12,6 +13,7 @@
 #include <thread>
 #include <unistd.h>
 #endif
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <optional>
@@ -45,14 +47,11 @@ struct SteamIP {
 // Tags are comma separated, so a name loses its commas; the whole list must
 // stay under Steam's 128 byte limit.
 std::string tag_text(std::string_view text, std::size_t limit) {
-    std::string result;
-    for (const char c : text) {
-        if (result.size() >= limit) break;
-        result += c == ',' ? ' ' : c;
-    }
-    // Never end inside a UTF-8 sequence.
-    while (!result.empty() && (static_cast<unsigned char>(result.back()) & 0xC0) == 0x80) result.pop_back();
-    if (!result.empty() && (static_cast<unsigned char>(result.back()) & 0xC0) == 0xC0) result.pop_back();
+    std::string result(text);
+    std::replace(result.begin(), result.end(), ',', ' ');
+    // Cut at the limit only, and never through a character: a whole last character
+    // is kept ("Café" stays "Café"), one the limit splits is dropped.
+    cut_text(result, limit);
     return result;
 }
 // Steam's library prints its own crash-reporting notes ("Setting breakpad
