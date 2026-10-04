@@ -167,7 +167,6 @@ void publish(Session &s, const NativeFrame *local) {
     view.lobby_name = s.lobby_name;
     // A dedicated server's roster capacity counts the server itself.
     view.capacity = static_cast<int>(dedicated_host(s) ? s.capacity - 1 : s.capacity);
-    view.party_overlay = s.party_overlay;
     load_host_preferences(s);
     view.saved_host = {true, s.host_preferences.public_lobby, s.host_preferences.password_required,
                        static_cast<int>(s.host_preferences.capacity), s.host_preferences.tps, s.host_preferences.lobby_name};
@@ -181,7 +180,7 @@ void publish(Session &s, const NativeFrame *local) {
     view.party = s.local_party;
     view.party_leader = s.local_party_leader;
     view.party_open = s.local_party_open;
-    view.parties = view.dedicated;
+    view.parties = s.mode == Mode::host || s.mode == Mode::join;
     for (const auto &invite : s.party_invites) {
         const auto *from = find_peer(s, invite.from);
         view.party_invites.push_back({invite.from, from && !from->member.name.empty() ? from->member.name
@@ -395,7 +394,7 @@ std::vector<MultiplayerChatCommand> chat_commands(const Session &s) {
         {"/tp", "/tp <player>", "Teleport beside a player (or /tp <x> <y> <z>)", "player"},
         {"/p", "/p <message>", "Talk to your party only"},
     };
-    if (dedicated_host(s)) {
+    if (s.mode == Mode::host || s.mode == Mode::join) {
         list.push_back({"/party invite", "/party invite <player>", "Invite a player to your party", "player"});
         list.push_back({"/party accept", "/party accept [player]", "Join the party you were invited to", "player"});
         list.push_back({"/party decline", "/party decline [player]", "Turn down a party invite", "player"});

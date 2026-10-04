@@ -1173,9 +1173,11 @@ void apply_queue_timer(Relay &r, bool linked, std::uint64_t now) {
 
 void maintain(Relay &r, std::uint64_t now) {
     if (!r.in_world) return;
-    // The event types are found once per process by a background heap scan, started as soon
-    // as the player is in a world with others so a drop never waits for it.
-    if (!r.prepared && now >= r.next_prepare) {
+    // The event types belong to the level: each one's are found by a background heap scan,
+    // started as soon as the player is in a world with others so a drop never waits for it.
+    // Asked again four times a second rather than remembered, since a level change (in a
+    // session or out of one) leaves them to be found again.
+    if (now >= r.next_prepare) {
         r.next_prepare = now + 250;
         r.prepared = prepare_throwdown_injection();
     }

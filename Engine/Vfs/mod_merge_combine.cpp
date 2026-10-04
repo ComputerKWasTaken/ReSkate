@@ -359,9 +359,15 @@ fb::TocDocument combine(const fs::path& baseToc, const fs::path& baseRoot,
             store.shift(file.location, file.offset, placement);
             if (file.location.patch) used.emplace(file.location.installChunk, file.location.archive);
         }
+        // Which of the region's files now lie in the merged patch rather than in this
+        // mod's own archives, by position. Kept in step with region.files: an addition
+        // below moves every later file along, and the pass over the bundle's assets
+        // further down asks by where a file is then, not where it was.
+        std::vector<bool> inPatch(region.files.size());
         for (const auto* moved : {&renumbered, &overridden})
             for (const auto& [index, file] : *moved) {
                 region.files[index] = file;
+                inPatch[index] = true;
                 used.emplace(file.location.installChunk, file.location.archive);
             }
         // Added EBX go after this copy's own EBX and added resources after its own
@@ -369,9 +375,10 @@ fb::TocDocument combine(const fs::path& baseToc, const fs::path& baseRoot,
         // positions still hold.
         for (auto& addition : additions) {
             const auto ebx = addition.asset.kind == fb::AssetKind::ebx;
-            const auto at = 1 + casManifest.ebx.size() + (ebx ? 0 : casManifest.resources.size());
+            const auto at = static_cast<std::ptrdiff_t>(1 + casManifest.ebx.size() + (ebx ? 0 : casManifest.resources.size()));
             (ebx ? casManifest.ebx : casManifest.resources).push_back(std::move(addition.asset));
-            region.files.insert(region.files.begin() + static_cast<std::ptrdiff_t>(at), addition.file);
+            region.files.insert(region.files.begin() + at, addition.file);
+            inPatch.insert(inPatch.begin() + at, true);
             used.emplace(addition.file.location.installChunk, addition.file.location.archive);
         }
         const auto fresh = !states.contains(key);
@@ -429,13 +436,13 @@ fb::TocDocument combine(const fs::path& baseToc, const fs::path& baseRoot,
             entry.base = isBase;
             auto id = asset_key(entry.asset);
             // A copy rewritten above (another mod's change, renumbered collision)
-            // is not this mod's edit and no longer lies in this mod's archives: it
-            // is in the merged patch. Recorded as a contribution it was read back
-            // from the mod's folder at the patch's offset, the read failed, and
-            // the assets that really had two edits (the item collections every
-            // cosmetic mod adds its items to) fell back to one mod's copy.
-            const bool rewritten = renumbered.contains(firstFile + position) ||
-                                   overridden.contains(firstFile + position);
+            // or added from another mod is not this mod's edit and does not lie in
+            // this mod's archives: it is in the merged patch. Recorded as a
+            // contribution it was read back from the mod's folder at the patch's
+            // offset, the read failed, and the assets that really had two edits
+            // (the item collections every cosmetic mod adds its items to) fell back
+            // to one mod's copy.
+            const bool rewritten = firstFile + position < inPatch.size() && inPatch[firstFile + position];
             if (!rewritten && (entry.asset.kind == fb::AssetKind::ebx ||
                                entry.asset.kind == fb::AssetKind::resource)) {
                 // The contributor's own copy still sits at its original offset in

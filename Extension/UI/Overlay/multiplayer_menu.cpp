@@ -236,12 +236,6 @@ void debug_page(SkateMenu &menu, const MultiplayerModel &mp, const CallbacksV3 &
 void multiplayer_display_settings(SkateMenu &menu, const Model &model) {
     const auto &mp = model.multiplayer;
     begin_card(menu, "multiplayer-display", "MULTIPLAYER");
-    bool party_overlay = mp.party_overlay;
-    if (toggle_row(menu, "Lobby party", "Everyone in a lobby is in your game's own party (party list, member counter, Coop button, map colours). A party you form on a dedicated server always shows. Local only.",
-            party_overlay)) {
-        std::array<char, 65> unused{};
-        send_private(menu, "party-overlay", party_overlay ? "on" : "off", unused, false);
-    }
     bool nametags = mp.nametags;
     if (toggle_row(menu, "Player nametags", "The name above each skater.", nametags)) {
         std::array<char, 65> unused{};

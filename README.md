@@ -12,10 +12,9 @@ the launcher, the runtime that loads into the game, and the dedicated server.
   and the game runs even with Steam closed.
 - **Multiplayer.**
   - Host a Steam lobby for up to 32 players: public, or joined with a code, with an optional password.
-    Everyone in a lobby is in one party.
   - Join dedicated servers from the in-game server browser.
   - Proximity voice chat, and text chat with emotes and an optional bad-word filter.
-  - Parties on dedicated servers: invite, join, leave, promote.
+  - Parties in lobbies and on dedicated servers: invite, join, leave, promote.
   - Throwdowns with other players (Jam, Spot Battle and S.K.A.T.E.), and co-op challenges.
 - **In-game menu and console.**
   - Map and fast travel.

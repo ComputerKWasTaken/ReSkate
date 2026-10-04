@@ -667,15 +667,24 @@ void networking(Session &s, const NativeFrame &local, std::uint64_t now) {
             }
             continue;
         }
-        // A dedicated server telling us about a party invite.
+        // Whoever hosts telling us about a party invite; or, hosting a lobby, a guest asking
+        // for something to be done with their party.
         if (p.kind == PacketKind::party) {
-            if (dedicated_host(s) && message.peer == s.host_id && p.source == s.host_id) receive_party(s, p, now);
+            if (s.mode == Mode::join) {
+                if (message.peer == s.host_id && p.source == s.host_id) receive_party(s, p, now);
+            } else if (s.mode == Mode::host) {
+                auto *sender = find_peer(s, p.source);
+                if (!direct_link && sender && sender->handshaken && message.peer == p.source &&
+                    routed_source(p, sender->member, message.peer, true, s.host_id) && sender->party_budget.accept(now, 20))
+                    host_party_request(s, p.source, p.party_action, p.party_player, now);
+            }
             continue;
         }
-        // A dedicated server's answer to one of our admin requests.
+        // A dedicated server's answer to one of our admin requests, or a lobby host's to a
+        // party request: a line for this player only.
         if (p.kind == PacketKind::admin) {
-            if (s.mode == Mode::join && message.peer == s.host_id && p.source == s.host_id && dedicated_host(s))
-                add_chat(s, 0, "Server", p.text);
+            if (s.mode == Mode::join && message.peer == s.host_id && p.source == s.host_id)
+                add_chat(s, 0, dedicated_host(s) ? "Server" : "ReSkate", p.text);
             continue;
         }
         // Chat is accepted while either side is still loading a map: it needs
@@ -690,6 +699,11 @@ void networking(Session &s, const NativeFrame &local, std::uint64_t now) {
             // Everyone holds everyone to the same pace, so a modified client cannot flood.
             if (!server && sender->chat_rate.accept(now, p.text, 1) != ChatRate::Verdict::accepted) continue;
             sender->last_packet = now;
+            // "/p": party chat, which a lobby's host relays to the sender's party and nobody else.
+            if (s.mode == Mode::host && p.text.starts_with("/p ")) {
+                host_party_chat(s, sender->member.id, std::string_view(p.text).substr(3), now);
+                continue;
+            }
             add_chat(s, sender->member.id, server ? std::string("Server")
                      : sender->member.name.empty() ? s.transport.name(sender->member.id) : sender->member.name, p.text);
             if (s.mode == Mode::host) broadcast(s, p, true, false, now, p.source);
@@ -798,6 +812,7 @@ void networking(Session &s, const NativeFrame &local, std::uint64_t now) {
         }
     }
     update_scoring(s, now); // before the roster, so a host's own flag goes out with it
+    tick_host_parties(s, now); // and the lobby's parties, which the roster carries
     if (s.mode == Mode::host && world_playing(s, local) && (s.roster_dirty || now - s.last_roster > 2000000))
         send_roster(s, now);
     const auto peers = active_peers(s);

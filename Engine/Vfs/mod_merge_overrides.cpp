@@ -96,13 +96,23 @@ AssetOverrides collect_asset_overrides(const std::vector<const Mod*>& mods,
                     ": its changes could not be read for other mods' copies (" + failure.what() + ")");
             }
         }
-        // One addition per kind and name in a bundle, the highest-priority mod's.
+        // One addition per kind and name in a bundle, the highest-priority mod's. Two
+        // mods adding the same asset is no clash; two different assets under one name
+        // is, and only one of them can be what a copy gets: say whose, so a song or an
+        // item that goes missing on a map can be traced to the mod that took its name.
+        std::map<std::string, std::pair<std::size_t, std::string>, std::less<>> shadowed;   // by the mod kept
         const auto keep = [&](const std::string& bundle, AssetAddition addition) {
             auto& list = out.added[bundle];
             const auto name = lower(addition.asset.name);
-            if (std::ranges::any_of(list, [&](const AssetAddition& other) {
-                    return other.asset.kind == addition.asset.kind && lower(other.asset.name) == name; }))
+            const auto holder = std::ranges::find_if(list, [&](const AssetAddition& other) {
+                return other.asset.kind == addition.asset.kind && lower(other.asset.name) == name; });
+            if (holder != list.end()) {
+                if (holder->mod != addition.mod && holder->asset.sha1 != addition.asset.sha1) {
+                    auto& [count, example] = shadowed[holder->mod];
+                    if (!count++) example = addition.asset.name;
+                }
                 return false;
+            }
             list.push_back(std::move(addition));
             return true;
         };
@@ -129,13 +139,19 @@ AssetOverrides collect_asset_overrides(const std::vector<const Mod*>& mods,
             }
         }
         for (auto& [bundle, companion] : companions) {
-            const auto& list = out.added[bundle];
+            // Looked up, not made: a bundle with nothing carried must stay out of `added`.
+            const auto found = out.added.find(bundle);
+            if (found == out.added.end()) continue;
             const auto name = lower(companion.asset.name);
-            if (std::ranges::any_of(list, [&](const AssetAddition& addition) {
+            if (std::ranges::any_of(found->second, [&](const AssetAddition& addition) {
                     return addition.mod == mod->name && addition.asset.kind == fb::AssetKind::ebx &&
                            lower(addition.asset.name) == name; }))
                 keep(bundle, std::move(companion));
         }
+        for (const auto& [other, clash] : shadowed)
+            report.notes.push_back(mod->name + ": " + std::to_string(clash.first) +
+                " added asset(s) share a name with ones " + other + " adds, e.g. " + clash.second +
+                "; other mods' copies of the bundle get " + other + "'s");
         // The new TOC chunks this mod's carried EBX name (as raw GUID bytes, the way an
         // EBX stores a ChunkId), so they can follow those assets into other superbundles.
         if (!newChunks.empty()) {

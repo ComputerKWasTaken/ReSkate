@@ -325,6 +325,29 @@ void copy_in_the_adders_toc_is_left_alone() {
     expect(files == expected, "same TOC: the merged bundle is the union, " + std::to_string(expected) + " files (" +
            std::to_string(files) + " files)");
 }
+// Two asset mods each add test/song, each named by a change of its own (the rival's is to the
+// other asset). Only one can be carried into the map's copy: the higher-priority mod's. When the
+// two are different assets the merge says whose the name went to; the same asset added by both
+// is no clash and is not reported.
+void same_name_from_two_mods(bool different) {
+    const std::string label = different ? "name clash" : "same asset twice";
+    Fixture fixture(different ? "name-clash" : "same-twice");
+    const auto song = guid(different ? 20 : 10);
+    fixture.add("music", false, shared_toc, {}, music_assets(), music_resources());
+    fixture.add("rival", false, shared_toc, {},
+                {{"test/playlist", 0, ebx_document(guid(1), {})},
+                 {"test/other", 1, ebx_document(guid(2), {song})},
+                 {"test/song", different ? 1u : 0u, ebx_document(song, {})}});
+    fixture.add("map", true, map_toc, {map_superbundle}, game_copy());
+    const auto report = mods::merge_mods(fixture.catalog);
+    expect(report.issue.empty() && report.built, label + ": the merge builds the patch\n" + describe(report));
+    const bool said = noted(report, "rival: 1 added asset(s) share a name with ones music adds, e.g. test/song; "
+                                    "other mods' copies of the bundle get music's");
+    expect(said == different, label + (different ? ": the merge says whose asset the name went to\n"
+                                                 : ": nothing is reported\n") + describe(report));
+    expect(noted(report, std::string("map: ") + bundle_name + ": 3 asset(s) added by other mods, e.g. test/song"),
+           label + ": the map's copy still receives the first mod's three\n" + describe(report));
+}
 } // namespace
 
 int main() try {
@@ -333,6 +356,8 @@ int main() try {
     carried_into_the_maps_copy(true, baseline);
     carried_into_the_maps_copy(false, baseline);
     copy_in_the_adders_toc_is_left_alone();
+    same_name_from_two_mods(true);
+    same_name_from_two_mods(false);
     if (failures) {
         std::cerr << failures << " failure(s)\n";
         return 1;

@@ -10,6 +10,7 @@
 #include "Extension/Multiplayer/Steam/steam_lobbies.h"
 #include "Extension/Multiplayer/Steam/steam_server_browser.h"
 #include "room.h"
+#include "party_book.h"
 #include "Extension/Multiplayer/Net/delta_codec.h"
 #include "password.h"
 #include "client_timing.h"
@@ -43,7 +44,8 @@ struct ChatBudget {
 };
 // Throwdown messages per sender per 5 s: offers, joins, starts and ~4 scores a second.
 inline constexpr unsigned throwdown_burst = 60;
-// The party number of a listen host's lobby, which is always one party.
+// The party the echo test shows its mirrored player in (a real lobby has none until its
+// players form one).
 inline constexpr std::uint32_t lobby_party = 1;
 struct Peer {
     // Guests: this owner's layout as relayed by the host. Host: the owner's own
@@ -105,7 +107,7 @@ struct Peer {
     bool received_voice{};
     VoiceBudget voice_budget;
     ChatRate chat_rate;
-    ChatBudget throwdown_budget;
+    ChatBudget throwdown_budget, party_budget;
     // Host: how the guest's mods change trick scoring, as they reported it (Engine/Vfs/mod_scoring.h):
     // nothing until the report arrives, 0 for the game's own. member.scoring is the verdict.
     std::optional<std::uint64_t> scoring;
@@ -200,7 +202,7 @@ struct Session {
     bool travelling{}, host_world_ready = true;
     unsigned capacity = max_players;
     // Local display preferences, loaded once from the profile. Never sent to peers.
-    bool party_overlay = true, nametags = true, chat_visible = true, display_preferences_loaded{};
+    bool nametags = true, chat_visible = true, display_preferences_loaded{};
     bool custom_nametags = true; // ReSkate's nametags instead of the game's (Hud/custom_nametags.h)
     bool chat_filter = true;     // bad words in chat show as **** (Engine/Core/Text/word_filter.h)
     bool game_menu{};            // a game menu is up or the game's UI is hidden: no chat on screen
@@ -257,8 +259,11 @@ struct Session {
     std::uint64_t object_owners_at{};
     // Throwdown messages received since the last relay tick: sender, encoded message.
     std::vector<std::pair<std::uint64_t, std::vector<std::uint8_t>>> throwdown_inbox;
-    // Parties (session_party.cpp): the local player's own roster entry, and the invites a
-    // dedicated server passed on (newest last). A listen host's lobby is always one party.
+    // Parties (session_party.cpp): the local player's own roster entry, and the invites the
+    // host passed on (newest last). Whoever hosts owns the parties: a dedicated server, or in
+    // a lobby the host's game, in `parties`. Nobody is in one until they form it.
+    PartyBook parties;
+    std::uint64_t parties_revision{}; // the book's revision the last roster was built from
     std::uint32_t local_party{};
     bool local_party_leader{}, local_party_open{};
     bool local_speeding{}; // the dedicated server flagged our game speed: no linked activities
@@ -311,6 +316,8 @@ std::string send_chat(Session &s, std::string_view typed);
 // A "/" command for a dedicated server (votes, and any server command for its admins): sent
 // like chat but never shown as a line; the server answers in chat.
 std::string send_chat_command(Session &s, std::string_view typed);
+// "/p <message>" in a lobby: one line for the local player's party only, relayed by the host.
+std::string send_party_chat(Session &s, std::string_view typed);
 // The "/" commands this session offers (the chat overlay lists them as the player types "/").
 std::vector<MultiplayerChatCommand> chat_commands(const Session &s);
 // One encoded throwdown message from this player to everyone else (through the host).
@@ -352,8 +359,18 @@ std::uint64_t party_leader(const Session &s); // the local party's leader, 0 wit
 void set_local_party(Session &s, const Member &local);
 void receive_party(Session &s, const Packet &p, std::uint64_t now);
 void expire_party_invites(Session &s, std::uint64_t now);
-// Sends a request to the dedicated server; returns why it can't, or empty.
+// Sends a request to whoever owns the parties (a lobby's host answers its own at once);
+// returns why it can't, or empty.
 std::string send_party_request(Session &s, PartyAction action, std::uint64_t player);
+// A lobby's host: answers `from`'s party request, as a dedicated server does.
+void host_party_request(Session &s, std::uint64_t from, PartyAction action, std::uint64_t player, std::uint64_t now);
+// A lobby's host: `from`'s "/p" line, relayed to the rest of their party only.
+void host_party_chat(Session &s, std::uint64_t from, std::string_view text, std::uint64_t now);
+// A lobby's host, every network tick: players who left are out of their parties, lapsed
+// invites are withdrawn, and a change sends a new roster.
+void tick_host_parties(Session &s, std::uint64_t now);
+// A lobby's host: each roster member's party as the book has it.
+void fill_roster_parties(Session &s, std::vector<Member> &members);
 bool accept_data(Peer &peer, const Packet &p, std::uint64_t now);
 // The same, moving a pose into the playback buffer (the packet's pose is left empty).
 bool accept_data(Peer &peer, Packet &&p, std::uint64_t now);

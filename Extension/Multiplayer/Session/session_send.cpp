@@ -207,6 +207,29 @@ std::string send_chat_command(Session &s, std::string_view typed) {
     }
     return {};
 }
+std::string send_party_chat(Session &s, std::string_view typed) {
+    if (s.mode != Mode::host && s.mode != Mode::join) return "Chat needs a multiplayer session.";
+    if (!s.local_party) return "You're not in a party.";
+    const auto text = clean_chat_text(typed);
+    if (text.empty()) return "Type a message first.";
+    const auto now = now_us();
+    switch (s.local_chat_rate.accept(now, text)) {
+    case ChatRate::Verdict::repeated: return "You just said that.";
+    case ChatRate::Verdict::too_fast: return "Slow down: one message every couple of seconds.";
+    case ChatRate::Verdict::accepted: break;
+    }
+    const auto local = s.transport.status().local_id;
+    if (s.mode == Mode::host) {
+        host_party_chat(s, local, text, now);
+    } else {
+        // The host relays it to the rest of the party, not back to us.
+        auto message = packet(s, PacketKind::chat, now);
+        message.text = clean_chat_text("/p " + text);
+        if (!send_packet(s, s.host_id, message, true, false)) return "Could not reach the host.";
+    }
+    add_chat(s, local, s.transport.name(local), "[Party] " + text, true);
+    return {};
+}
 void send_throwdown(Session &s, std::vector<std::uint8_t> message) {
     if ((s.mode != Mode::host && s.mode != Mode::join) || message.empty() || message.size() > max_throwdown_message) return;
     const auto now = now_us();
@@ -403,18 +426,19 @@ void send_roster(Session &s, std::uint64_t now) {
             peer.member.name = s.transport.name(peer.member.id);
             p.members.push_back(peer.member);
         }
-    // A lobby is one party: everyone in it, led by the host (a party needs two players).
-    for (auto &m : p.members) {
-        m.party = p.members.size() > 1 ? lobby_party : 0;
-        m.party_leader = m.party && m.id == p.source;
-        m.party_open = false;
-    }
+    // Parties are the ones the lobby's players formed (session_party.cpp), as on a dedicated
+    // server. The host's own copy of each player follows the roster it sends.
+    fill_roster_parties(s, p.members);
     for (auto &peer : active_peers(s))
-        if (peer.handshaken) {
-            peer.member.party = p.members.front().party;
-            peer.member.party_leader = false;
-        }
-    if (p.members.front().party != s.local_party) ++s.party_revision;
+        if (peer.handshaken)
+            for (const auto &m : p.members)
+                if (m.id == peer.member.id) {
+                    if (peer.member.party != m.party || peer.member.party_leader != m.party_leader ||
+                        peer.member.party_open != m.party_open) ++s.party_revision;
+                    peer.member.party = m.party;
+                    peer.member.party_leader = m.party_leader;
+                    peer.member.party_open = m.party_open;
+                }
     set_local_party(s, p.members.front());
     broadcast(s, p, true, false, now);
     s.roster_dirty = false;

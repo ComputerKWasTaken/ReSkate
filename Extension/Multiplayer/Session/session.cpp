@@ -100,6 +100,8 @@ void stop(Session &s, std::string reason) {
     set_lobby_park_mode(false, false);
     s.parks = {}; s.next_park_update = 0;
     s.next_party_update = 0;
+    s.parties = PartyBook{};
+    s.parties_revision = 0;
     s.client_timing = {};
     s.next_publish = 0;
     s.last_client_log = 0;
@@ -244,23 +246,21 @@ void publish_party(Session &s) {
     }
     if (!s.display_preferences_loaded) {
         s.display_preferences_loaded = true;
-        // A lobby is one party unless the player turned that off (the older PartyOverlay
-        // preference, off by default, is not carried over).
-        s.party_overlay = profile_runtime::local_preference("LobbyParty").value_or(true);
         s.nametags = profile_runtime::local_preference("Nametags").value_or(true);
         s.custom_nametags = profile_runtime::local_preference("CustomNametags").value_or(true);
         s.chat_visible = profile_runtime::local_preference("ChatVisible").value_or(true);
         s.chat_filter = profile_runtime::local_preference("ChatFilter").value_or(true);
         apply_nametags(s);
     }
-    // The party's limit: a lobby is one party of up to its capacity; a dedicated server's
-    // parties hold up to eight (the game's Party panel rows).
+    // The party's limit: parties players form hold up to eight (the game's Party panel rows),
+    // in a lobby as on a dedicated server.
+    const bool session = s.mode == Mode::host || s.mode == Mode::join;
     const auto capacity = s.mode == Mode::off ? static_cast<unsigned>(max_players)
-                        : dedicated_host(s) ? static_cast<unsigned>(PartyBook::default_limit) : s.capacity;
-    // A party formed on a dedicated server is always the game's party (its Social menu, Coop
-    // button, beacons...); a lobby is one too unless the player turned Lobby party off.
-    set_native_party_changes(dedicated_host(s));
-    const bool shown = dedicated_host(s) ? s.local_party != 0 : s.mode != Mode::off && s.party_overlay;
+                        : session ? static_cast<unsigned>(PartyBook::default_limit) : s.capacity;
+    // A party the player formed is the game's party (its Social menu, Coop button, beacons...).
+    // Nobody is in one just for being in the same lobby or on the same server.
+    set_native_party_changes(session);
+    const bool shown = session ? s.local_party != 0 : s.mode != Mode::off;
     update_native_party(s.base, roster, capacity, shown);
 }
 // Links the players' own throwdowns (Extension/Throwdowns/throwdown_relay.cpp). Runs

@@ -528,7 +528,8 @@ void update_model(std::uintptr_t client, TickState& frame) {
         enable_saved_feature("EnableCASArtistSandbox", profile_access.cosmetics);
         enable_saved_feature("EnableMyStuffMenu", profile_access.cosmetics);
         if (profile_access.preset_slots) slot_action = dingosdk::SkaterSlotOverrideAction::enable;
-        const auto slots = dingosdk::update_skater_slot_override(slot_action, dingosdk::local_customization_selected_preset());
+        const auto slots = dingosdk::update_skater_slot_override(slot_action, dingosdk::local_customization_selected_preset(),
+            dingosdk::local_customization_outfits_loadable());
         if (slots.manager_available && slots.ui_ready)
             dingosdk::observe_local_customization_selection(slots.selected_slot);
         const bool missions_requested = offline.model.activities.available &&

@@ -105,9 +105,8 @@ struct MultiplayerModel {
     // game's own). Guest: what that does here, while enforced.
     bool enforce_tuning{true};
     std::string tuning_status;
-    // Local display preferences: a lobby shown as the game's own party (Lobby party),
-    // and the floating name label above each peer.
-    bool party_overlay{true}, nametags{true};
+    // Local display preference: the floating name label above each peer.
+    bool nametags{true};
     // Nametag style: ReSkate's own (name, distance, role colours, dots) or the game's.
     bool custom_nametags{true};
     // Local: whether session text chat shows at all (and T opens it).
@@ -134,8 +133,8 @@ struct MultiplayerModel {
     bool password_required{};
     int players = 1, capacity = multiplayer_player_limit;
     std::vector<MultiplayerPlayer> roster;
-    // The local player's party: a lobby is always one party led by the host; on a dedicated
-    // server players form their own (`parties`: invite, leave, kick... are available).
+    // The local player's party. Players form their own, in a lobby as on a dedicated server
+    // (`parties`: invite, leave, kick... are available in any session).
     std::uint32_t party{};
     bool party_leader{}, party_open{}, parties{};
     std::vector<MultiplayerPartyInvite> party_invites; // newest last

@@ -322,7 +322,7 @@ void render_section(const Context& context, const MultiplayerModel& model, Secti
             for (const auto& player : model.roster) {
                 if (player.id == model.local_id || !player.connected) continue;
                 const auto id = std::to_string(player.id);
-                // On a dedicated server, your party members are marked (a lobby is one party anyway).
+                // Your party members are marked.
                 const std::string party = !model.parties || !player.party_member ? ""
                                         : player.party_leader ? "  /  PARTY LEADER" : "  /  PARTY";
                 add_button(context, main, "player-" + id, menu_view::caption(player.name) +
@@ -358,7 +358,7 @@ void render_section(const Context& context, const MultiplayerModel& model, Secti
             add_text(context, side, "invite", model.invite, 80.f);
             add_text(context, side, "session-tps", "Tick rate: " + std::to_string(model.tps), 48.f);
             if (model.parties) {
-                // Parties on a dedicated server: yours, and the invites waiting for an answer.
+                // Parties: yours, and the invites waiting for an answer.
                 for (const auto& invite : model.party_invites) {
                     const auto from = std::to_string(invite.from);
                     add_text(context, side, "party-invite-" + from, menu_view::caption(invite.name, 32) + " invited you to their party", 48.f);
@@ -391,8 +391,6 @@ void render_section(const Context& context, const MultiplayerModel& model, Secti
                 model.hosting ? "tuning-enforce" : "", "toggle", false, 136.f);
             add_button(context, side, "layers", std::string("World layer sync: ") + (model.force_world_layers ? "On" : "Off"),
                 model.hosting ? "world-layer-sync" : "", "toggle", false, 136.f);
-            add_button(context, side, "party-overlay", std::string("Lobby party: ") + (model.party_overlay ? "On" : "Off"),
-                "party-overlay", "toggle", false, 136.f);
             add_button(context, side, "nametags", std::string("Nametags: ") + (model.nametags ? "On" : "Off"),
                 "nametags", "toggle", false, 136.f);
             add_button(context, side, "nametag-style", std::string("Nametag style: ") + (model.custom_nametags ? "ReSkate" : "Game"),

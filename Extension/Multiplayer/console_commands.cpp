@@ -26,7 +26,7 @@ void register_multiplayer_commands(Commands &registry) {
                           Command{"chat", "Send a text message to everyone in the session (T opens the chat box)"},
                           Command{"server", "Send a command to the dedicated server you are an admin of (try: help)"},
                           Command{"tp", "Teleport to a player (name start) or to x y z"},
-                          Command{"party", "Your party on a dedicated server: invite|join|kick|promote <player>, "
+                          Command{"party", "Your party in a session: invite|join|kick|promote <player>, "
                                            "accept|decline [player], leave, open, close, status"},
                           Command{"tpall", "Host or server admin: teleport everyone to you"},
                           Command{"tphere", "Host or server admin: teleport one player to you"},
@@ -74,7 +74,7 @@ void register_multiplayer_commands(Commands &registry) {
     auto markers_choice = argument("on|off", Type::text, true);
     auto markers = action("mp map-markers",
                           "Named, selectable markers for your party members on the pause map, like the live game's "
-                          "(default; a lobby is one party). Off, or players outside your party: the game's plain player dots",
+                          "(default). Off, or players outside your party: the game's plain player dots",
                           Group::gameplay, {std::move(markers_choice)});
     markers.run = [](const Model &, const Values &values, const Output &out) {
         const auto &choice = std::get<std::string>(values[0]);

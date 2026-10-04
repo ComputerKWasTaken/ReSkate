@@ -20,8 +20,7 @@ bool cosmetic_diagnostic(const char* operation, const char* reason, std::string_
             // ..._rejected are), so a player's ordinary log says why; the rest are routine.
             const std::string_view why(reason);
             const bool routine = why == "callback_entered" || why == "unchanged" || why == "no_saved_loadout" ||
-                why == "card_only_preset_recovered" || why == "card_is_not_skater_preset" ||
-                why == "retried_after_catalog_ready";
+                why == "card_only_preset_recovered" || why == "card_is_not_skater_preset";
             const dingosdk::Json event{{"event", routine ? "local_cosmetic_loadout_diagnostic" : "local_cosmetic_loadout_rejected"},
                 {"operation", operation}, {"reason", reason}, {"preset", id}};
             dingosdk::logging::event(dingosdk::logging::Channel::customization, event.dump().c_str());
@@ -298,20 +297,14 @@ bool recover_card_only_preset(std::string_view id, const profile::CosmeticLoadou
     return true;
 }
 
-// The loadout manager's record array, or false when it cannot be read. The
-// same shape the save hook demands of a record it is handed.
-bool loadout_array(std::uintptr_t& manager, std::uintptr_t& begin, std::uintptr_t& end) {
+bool load_cosmetic_hook(const void* wrapper, void* destination) {
     auto& s = local_runtime();
-    return read(s.base + addr::engine::loadout_manager, manager) && manager &&
-        read(manager + 0x18, begin) && read(manager + 0x20, end) && begin <= end &&
-        (end - begin) % 0x48 == 0 && (end - begin) / 0x48 <= 10;
-}
-
-// A load, taking the preset id instead of the game's wrapper so that
-// retry_pending_cosmetic_loads can run it again. The caller holds native_mutex.
-bool apply_saved_loadout(const std::string& id, void* destination) {
-    auto& s = local_runtime();
+    if (!s.active.load(std::memory_order_acquire)) return s.load_cosmetic(wrapper, destination);
+    PreserveError preserve;
+    std::lock_guard lock(s.native_mutex);
+    std::string id;
     try {
+        if (!identifier(wrapper, id)) return cosmetic_diagnostic("load", "invalid_preset_id");
         const auto saved = s.store->cosmetic_loadout(id);
         if (!saved) {
             profile::CosmeticLoadout starter; std::vector<CosmeticNativeRecipe> native;
@@ -331,15 +324,14 @@ bool apply_saved_loadout(const std::string& id, void* destination) {
         profile::CosmeticLoadout defaults; std::vector<CosmeticNativeRecipe> native;
         if (!read_cosmetic_recipes(destination, defaults, native)) return cosmetic_diagnostic("load", "invalid_native_recipe", id);
         if (recover_card_only_preset(id, *saved, defaults)) return false;
-        if (!refresh_cosmetic_catalog()) {
-            // The cosmetics manager is not ready this early in a level load.
-            // The preset stays blocked, so nothing is written over the outfit
-            // on disk, and the pump applies this record once it is ready --
-            // but only while this is still the array the record came from.
-            CosmeticRuntime::PendingLoad pending{destination};
-            if (loadout_array(pending.manager, pending.begin, pending.end)) c.pending_loads[id] = pending;
-            return cosmetic_diagnostic("load", "catalog_not_ready", id);
-        }
+        // The cosmetics manager cannot be read for the first seconds of a level
+        // load, which is when the game asks for every slot up to the selected
+        // one. The catalog read before the load says the same thing (what is
+        // installed does not change with the level), so the outfit is checked
+        // against that one. Only with no catalog read yet this session is the
+        // load refused; the selection that asks is held back until one is
+        // (local_customization_outfits_loadable).
+        if (!refresh_cosmetic_catalog() && c.items.empty()) return cosmetic_diagnostic("load", "catalog_not_ready", id);
         if (saved->recipes.size() != defaults.recipes.size()) return cosmetic_diagnostic("load", "recipe_count_mismatch", id);
         const auto snapshot_shared = s.store->shared_snapshot();
         const auto& snapshot = *snapshot_shared;
@@ -393,7 +385,6 @@ bool apply_saved_loadout(const std::string& id, void* destination) {
         }
         s.copy_cosmetic(destination, native.data(), native.data() + native.size());
         c.blocked_loadouts.erase(id);
-        c.pending_loads.erase(id);
         if (held.empty()) c.held_slots.erase(id);
         else c.held_slots[id] = std::move(held);
         dingosdk::logging::event(dingosdk::logging::Channel::customization, "{\"event\":\"local_cosmetic_loadout_loaded\"}");
@@ -402,44 +393,6 @@ bool apply_saved_loadout(const std::string& id, void* destination) {
         if (!id.empty()) cosmetic_runtime().blocked_loadouts.insert(id);
         dingosdk::logging::event(dingosdk::logging::Channel::customization, "{\"event\":\"local_cosmetic_loadout_load_failed\"}");
         return false;
-    }
-}
-
-bool load_cosmetic_hook(const void* wrapper, void* destination) {
-    auto& s = local_runtime();
-    if (!s.active.load(std::memory_order_acquire)) return s.load_cosmetic(wrapper, destination);
-    PreserveError preserve;
-    std::lock_guard lock(s.native_mutex);
-    std::string id;
-    try {
-        if (!identifier(wrapper, id)) return cosmetic_diagnostic("load", "invalid_preset_id");
-    } catch (...) {
-        return cosmetic_diagnostic("load", "invalid_preset_id");
-    }
-    return apply_saved_loadout(id, destination);
-}
-
-void retry_pending_cosmetic_loads() {
-    auto& c = cosmetic_runtime();
-    if (c.pending_loads.empty()) return;
-    std::uintptr_t manager{}, begin{}, end{};
-    // Unreadable now: keep the records and come back, rather than losing them.
-    if (!loadout_array(manager, begin, end)) return;
-    auto pending = std::move(c.pending_loads);
-    c.pending_loads.clear();
-    for (const auto& [id, load] : pending) {
-        const auto p = reinterpret_cast<std::uintptr_t>(load.destination);
-        // The same array, the same bounds, and the record still inside it on
-        // its stride. Anything else and this address may now hold another
-        // preset: give up on the outfit rather than write it over a different
-        // saved character.
-        if (!load.destination || manager != load.manager || begin != load.begin || end != load.end ||
-            p < begin || p >= end || (p - begin) % 0x48) {
-            cosmetic_diagnostic("load", "retry_record_moved", id);
-            continue;
-        }
-        if (apply_saved_loadout(id, load.destination))
-            cosmetic_diagnostic("load", "retried_after_catalog_ready", id);
     }
 }
 

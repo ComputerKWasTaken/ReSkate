@@ -572,6 +572,63 @@ void throwdown_routing_checks() {
     sim.run(10);
     check(host.throwdown_inbox.empty() && second.throwdown_inbox.empty(), "A throwdown message from another world was relayed");
 }
+// A lobby's parties are the ones its players form, kept by the host the way a dedicated
+// server keeps them: nobody is in a party for being in the lobby.
+void party_checks() {
+    Simulation sim;
+    for (unsigned i = 0; i < 4; ++i) sim.add();
+    sim.run(60); sim.fresh(4);
+    auto &host = *sim.nodes[0], &first = *sim.nodes[1], &second = *sim.nodes[2], &third = *sim.nodes[3];
+    const auto id = [](const Session &s) { return s.transport.status().local_id; };
+    for (const auto &node : sim.nodes)
+        check(!node->local_party && node->party_invites.empty(), "A lobby put a player in a party nobody formed");
+
+    check(send_party_request(first, PartyAction::invite, id(second)).empty(), "A guest's party invite was not sent");
+    sim.run(20);
+    check(second.party_invites.size() == 1 && second.party_invites.front().from == id(first),
+          "The host did not pass a guest's invite on to the invited guest");
+    check(!first.local_party && !second.local_party, "An unanswered invite made a party");
+    check(send_party_request(second, PartyAction::accept, id(first)).empty(), "Accepting an invite was not sent");
+    sim.run(40);
+    check(first.local_party && first.local_party == second.local_party && first.local_party_leader && !second.local_party_leader,
+          "An accepted invite did not put both guests in one party led by the inviter");
+    check(party_member(first, id(second)) && party_member(second, id(first)), "Party members do not see each other as members");
+    check(!host.local_party && !third.local_party && !party_member(third, id(first)) && party_of(third, id(first)) == first.local_party,
+          "Players outside a party were put in it, or cannot see who is in it");
+
+    // The host's own requests are answered on the spot, and make a second party.
+    check(send_party_request(host, PartyAction::invite, id(third)).empty(), "The host's own party invite was refused");
+    sim.run(20);
+    check(third.party_invites.size() == 1 && third.party_invites.front().from == id(host), "The host's invite did not reach the guest");
+    check(send_party_request(third, PartyAction::accept, id(host)).empty(), "Accepting the host's invite was not sent");
+    sim.run(40);
+    check(host.local_party && host.local_party == third.local_party && host.local_party_leader && host.local_party != first.local_party,
+          "The host and its guest are not in a party of their own");
+    check(party_of(first, id(third)) == host.local_party && !party_member(first, id(third)), "A guest does not see the other party");
+
+    // Party chat reaches the party and nobody else.
+    const auto heard = [](const Session &s, std::string_view words) {
+        return std::any_of(s.chat.begin(), s.chat.end(), [&](const auto &line) { return line.text.find(words) != std::string::npos; });
+    };
+    check(send_party_chat(first, "meet at the bowl").empty(), "A guest's party chat was refused");
+    sim.run(20);
+    check(heard(first, "meet at the bowl") && heard(second, "meet at the bowl"), "Party chat did not reach the party");
+    check(!heard(host, "meet at the bowl") && !heard(third, "meet at the bowl"), "Party chat reached players outside the party");
+    check(send_party_chat(host, "host party only").empty(), "The host's party chat was refused");
+    sim.run(20);
+    check(heard(third, "host party only") && !heard(first, "host party only") && !heard(second, "host party only"),
+          "The host's party chat did not stay in its party");
+
+    // Leaving: a party left with one member is no party.
+    check(send_party_request(second, PartyAction::leave, 0).empty(), "Leaving a party was not sent");
+    sim.run(40);
+    check(!first.local_party && !second.local_party, "A party of one was kept");
+    check(send_party_chat(first, "anyone").starts_with("You're not in a party"), "Party chat was sent without a party");
+    // A guest leaving the lobby is out of their party as well.
+    stop(third, "Left"); sim.run(40);
+    check(!host.local_party && host.parties.parties().empty(), "A guest who left the lobby stayed in the host's party");
+    std::cout << "Lobby parties: nobody by default, invites, two parties, party chat, leaving and departures passed.\n";
+}
 // A lobby host keeps a guest whose mods change scoring or physics out of linked activities: the roster
 // flags them for everyone and the host passes none of their throwdown messages on.
 void scoring_checks() {
@@ -1214,7 +1271,7 @@ void session_controls_checks() {
         p.object_placement = host.object_placement;
         p.members.push_back({p.source, host.epoch, "Host"});
         for (const auto &peer : host.peers) if (peer.handshaken) p.members.push_back(peer.member);
-        // The lobby party, as the host's own roster sends it.
+        // Everyone in one party led by the host, as a roster may list them.
         for (auto &m : p.members) {
             m.party = p.members.size() > 1 ? lobby_party : 0;
             m.party_leader = m.party && m.id == p.source;
@@ -1414,7 +1471,7 @@ void world_layer_sync_checks() {
         p.layers = pack_world_layers(host.layers);
         p.members.push_back({p.source, host.epoch, "Host"});
         for (const auto &peer : host.peers) if (peer.handshaken) p.members.push_back(peer.member);
-        // The lobby party, as the host's own roster sends it.
+        // Everyone in one party led by the host, as a roster may list them.
         for (auto &m : p.members) {
             m.party = p.members.size() > 1 ? lobby_party : 0;
             m.party_leader = m.party && m.id == p.source;
@@ -1498,7 +1555,7 @@ void distance_settings_checks() {
         p.distances = host.distances; p.capacity = host.capacity;
         p.members.push_back({p.source, host.epoch, "Host"});
         for (const auto &peer : host.peers) if (peer.handshaken) p.members.push_back(peer.member);
-        // The lobby party, as the host's own roster sends it.
+        // Everyone in one party led by the host, as a roster may list them.
         for (auto &m : p.members) {
             m.party = p.members.size() > 1 ? lobby_party : 0;
             m.party_leader = m.party && m.id == p.source;
@@ -1794,6 +1851,7 @@ int main(int argc, char **argv) {
         if (argc == 2 && std::string_view(argv[1]) == "--travel-only") return 0;
         dingosdk::multiplayer::mesh_checks();
         dingosdk::multiplayer::throwdown_routing_checks();
+        dingosdk::multiplayer::party_checks();
         dingosdk::multiplayer::scoring_checks();
         dingosdk::multiplayer::object_sync_checks();
         dingosdk::multiplayer::session_controls_checks();

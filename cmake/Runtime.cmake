@@ -19,6 +19,7 @@ add_library(dingosdk_runtime SHARED
     Extension/Multiplayer/Session/session_receive.cpp
     Extension/Multiplayer/Session/session_commands.cpp
     Extension/Multiplayer/Session/session_party.cpp
+    Extension/Multiplayer/Session/party_book.cpp
     Extension/UI/NativeMenu/native_menu.cpp
     Extension/UI/NativeMenu/native_menu_rows.cpp
     Extension/UI/NativeMenu/native_menu_multiplayer.cpp

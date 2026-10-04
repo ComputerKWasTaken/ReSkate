@@ -303,10 +303,6 @@ void update_local_customization() noexcept {
         if (!c.catalog_failed && refresh_cosmetic_catalog()) {
             publish_cosmetic_catalog();
             publish_cosmetic_inventory();
-            // Outfits the game asked for before the catalog was ready: it does
-            // not ask again, so they are applied here instead of the player
-            // finding a standard skater that will not save over itself.
-            retry_pending_cosmetic_loads();
         }
     } catch (...) {
         cosmetic_runtime().catalog_failed = true;
@@ -356,6 +352,19 @@ std::uint32_t local_customization_selected_preset() noexcept {
     auto& s = local_runtime();
     if (!s.active.load(std::memory_order_acquire)) return 0;
     try { return s.store->selected_cosmetic_preset(); } catch (...) { return 0; }
+}
+bool local_customization_outfits_loadable() noexcept {
+    PreserveError preserve;
+    auto& s = local_runtime();
+    if (!s.active.load(std::memory_order_acquire)) return true;
+    std::lock_guard lock(s.native_mutex);
+    try {
+        if (!cosmetic_runtime().items.empty() || refresh_cosmetic_catalog()) return true;
+        // Nothing saved is nothing to check: a new profile's slots are built
+        // from the game's own defaults and need no catalog.
+        const auto snapshot = s.store->shared_snapshot();
+        return snapshot->customization.value("loadouts", dingosdk::Json::object()).empty();
+    } catch (...) { return true; }
 }
 void observe_local_customization_selection(std::int32_t index) noexcept {
     PreserveError preserve;

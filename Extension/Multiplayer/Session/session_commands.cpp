@@ -113,9 +113,8 @@ std::string party_command(Session &s, std::string_view argument) {
         return p ? peer_name(s, *p) : s.transport.name(id);
     };
     if (verb.empty() || verb == "status" || verb == "list") {
-        if (!s.local_party) return dedicated_host(s) ? "You're not in a party. Invite a player from their player card or with: party invite <name>."
-                                                     : "You're the only one in this lobby.";
-        std::string text = std::string(dedicated_host(s) ? "Your party" : "Your lobby's party") + (s.local_party_open ? " (open):" : ":");
+        if (!s.local_party) return "You're not in a party. Invite a player from their player card or with: party invite <name>.";
+        std::string text = std::string("Your party") + (s.local_party_open ? " (open):" : ":");
         const auto local = s.transport.status().local_id;
         text += " " + s.transport.name(local) + (s.local_party_leader ? " (leader)" : "");
         for (const auto &peer : active_peers(s))
@@ -123,7 +122,6 @@ std::string party_command(Session &s, std::string_view argument) {
                 text += ", " + peer_name(s, peer) + (peer.member.party_leader ? " (leader)" : "");
         return text;
     }
-    if (!dedicated_host(s)) return "Everyone in a lobby is in one party with the host.";
     static constexpr std::pair<std::string_view, PartyAction> verbs[] = {
         {"invite", PartyAction::invite}, {"accept", PartyAction::accept}, {"decline", PartyAction::decline},
         {"join", PartyAction::join},     {"leave", PartyAction::leave},   {"kick", PartyAction::kick},
@@ -307,16 +305,6 @@ std::string clear_guest_objects(Session &s, std::string_view) {
     return removed ? "Deleted " + std::to_string(removed) + " guest object" + (removed == 1 ? "" : "s") + "."
                    : "Guests have no placed objects to delete.";
 }
-std::string edit_party_overlay(Session &s, std::string_view argument) {
-    const auto enabled = parse_switch(argument, s.party_overlay);
-    if (!enabled) return "Use on, off, or toggle for the lobby party.";
-    s.party_overlay = *enabled;
-    s.display_preferences_loaded = true;
-    profile_runtime::set_local_preference("LobbyParty", s.party_overlay);
-    s.roster_dirty = true;
-    return s.party_overlay ? "Lobby party on: everyone in a lobby is in your game's party."
-                           : "Lobby party off: lobby players are not shown as your game's party.";
-}
 std::string edit_nametags(Session &s, std::string_view argument) {
     const auto enabled = parse_switch(argument, s.nametags);
     if (!enabled) return "Use on, off, or toggle for peer nametags.";
@@ -453,7 +441,7 @@ bool queue_command(std::string_view action, std::string_view argument, std::stri
     if (launcher::offline_mode()) return false;
     if ((action != "host" && action != "host-config" && action != "join" && action != "join-lobby" && action != "join-friend-lobby" && action != "stop" &&
          action != "distances" && action != "object-placement" && action != "kick" && action != "clear-objects" &&
-         action != "party-overlay" && action != "nametags" && action != "nametag-style" && action != "chat-visible" && action != "chat-filter" &&
+         action != "nametags" && action != "nametag-style" && action != "chat-visible" && action != "chat-filter" &&
          action != "voice" && action != "voice-mute" &&
          action != "voice-volume" && action != "voice-allow" && action != "voice-range" && action != "chat" && action != "ban" && action != "unban" &&
          action != "world-layer-sync" && action != "noclip-allow" && action != "nobail-allow" && action != "boosts-allow" &&
@@ -513,8 +501,8 @@ std::string command(std::string_view action, std::string_view argument, std::str
                 if (!result.empty()) add_chat(s, 0, "ReSkate", result);
                 return result;
             } else if (!dedicated_host(s) && verb == "p") {
-                // In a lobby everyone is in the one party: party chat is chat.
-                const auto refused = send_chat(s, rest);
+                // A lobby's host relays party chat, as a dedicated server does.
+                const auto refused = send_party_chat(s, rest);
                 if (!refused.empty() && (s.mode == Mode::host || s.mode == Mode::join)) add_chat(s, 0, "ReSkate", refused);
                 return refused.empty() ? "Message sent." : refused;
             } else if (!dedicated_host(s) && verb == "party") {
@@ -630,7 +618,7 @@ std::string command(std::string_view action, std::string_view argument, std::str
             {"ban", ban_player},                           {"unban", unban_player},
             {"clear-objects", clear_guest_objects},
             {"world-layer-sync", edit_world_layer_sync},   {"distances", edit_distances},
-            {"party-overlay", edit_party_overlay},         {"nametags", edit_nametags},
+            {"nametags", edit_nametags},
             {"nametag-style", edit_nametag_style},
             {"chat-visible", edit_chat_visible}, {"chat-filter", edit_chat_filter}};
         for (const auto &[name, edit] : settings)

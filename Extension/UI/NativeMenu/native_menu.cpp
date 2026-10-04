@@ -40,10 +40,11 @@ template<unsigned Slot, std::size_t Index> void activate() noexcept {
     if (lifetime.blocked()) return;
     auto& s = page_state(Slot);
     if (Index >= s.action_count.load(std::memory_order_acquire)) return;
-    const auto& action = s.actions[Index].action;
-    if (action.generation != s.generation.load(std::memory_order_acquire)) return;
     try {
+        // Under the lock: a render pass can hand this slot to another command.
         std::lock_guard lock(s.mutex);
+        const auto& action = s.actions[Index].action;
+        if (action.generation != s.generation.load(std::memory_order_acquire)) return;
         if (s.pending.size() < 8) s.pending.push_back(action);
     } catch (...) { }
 }
@@ -61,27 +62,36 @@ Address action(const Context& context, std::string command, std::string argument
     auto& s = state();
     const auto generation = s.generation.load();
     const auto count = s.action_count.load();
-    for (unsigned i = 0; i < count; ++i) {
-        const auto& a = s.actions[i].action;
-        if (a.generation == generation && a.command == command && a.argument == argument)
-            return reinterpret_cast<Address>(&s.actions[i].info);
+    const auto slot = action_slot(count, max_actions, [&](std::size_t i) -> const Action& { return s.actions[i].action; },
+        command, argument, s.pass);
+    require(slot.has_value(), "Native menu action limit reached; restart to refresh the menu.");
+    auto& result = s.actions[*slot];
+    const bool unused = *slot == count;
+    if (unused) {
+        static const std::array functions{callbacks<0>(std::make_index_sequence<max_actions>{}),
+            callbacks<1>(std::make_index_sequence<max_actions>{})};
+        // Native void-action descriptor used by this build. Only the invokers are
+        // replaced; it is never added to the game's global function registry.
+        const auto prototype = context.base + addr::native_menu::action_prototype;
+        require(read<Address>(prototype + 0x40) == context.base + addr::native_menu::action_invoker &&
+                read<std::uint8_t>(prototype + 0x68) == 0,
+                "Native menu action ABI differs.");
+        require(memory::read_bytes(prototype, result.descriptor.data(), result.descriptor.size()), "Native menu action template is unavailable.");
+        const auto function = reinterpret_cast<Address>(functions[s.slot][count]);
+        for (const auto offset : {0x30, 0x40, 0x48}) std::memcpy(result.descriptor.data() + offset, &function, sizeof(function));
+        result.info = reinterpret_cast<Address>(result.descriptor.data());
     }
-    require(count < max_actions, "Native menu action limit reached; restart to refresh the menu.");
-    static const std::array functions{callbacks<0>(std::make_index_sequence<max_actions>{}),
-        callbacks<1>(std::make_index_sequence<max_actions>{})};
-    auto& result = s.actions[count];
-    // Native void-action descriptor used by this build. Only the invokers are
-    // replaced; it is never added to the game's global function registry.
-    const auto prototype = context.base + addr::native_menu::action_prototype;
-    require(read<Address>(prototype + 0x40) == context.base + addr::native_menu::action_invoker &&
-            read<std::uint8_t>(prototype + 0x68) == 0,
-            "Native menu action ABI differs.");
-    require(memory::read_bytes(prototype, result.descriptor.data(), result.descriptor.size()), "Native menu action template is unavailable.");
-    const auto function = reinterpret_cast<Address>(functions[s.slot][count]);
-    for (const auto offset : {0x30, 0x40, 0x48}) std::memcpy(result.descriptor.data() + offset, &function, sizeof(function));
-    result.info = reinterpret_cast<Address>(result.descriptor.data());
-    result.action = {generation, std::move(command), std::move(argument)};
-    s.action_count.store(count + 1, std::memory_order_release);
+    {
+        // activate() reads the slot on the game's own thread.
+        std::lock_guard lock(s.mutex);
+        if (unused || result.action.command != command || result.action.argument != argument) {
+            result.action.command = std::move(command);
+            result.action.argument = std::move(argument);
+        }
+        result.action.generation = generation;
+        result.action.pass = s.pass;
+    }
+    if (unused) s.action_count.store(count + 1, std::memory_order_release);
     return reinterpret_cast<Address>(&result.info);
 }
 Address blueprint(std::string_view name) {
@@ -104,6 +114,7 @@ Value make(const Context& context, Schema schema) {
 namespace {
 void render(const Context& context, const MultiplayerModel& model) {
     auto& s = state();
+    ++s.pass;
     const auto publish = [&](const std::vector<native_tools::Row>& rows, Value list, unsigned slot, float width) {
         s.row_width = width;
         std::vector<std::string> visible;
