@@ -580,6 +580,78 @@ void mods_broken_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, Ui&
     ImGui::End();
 }
 
+// What PLAY shows while mods have updates waiting. Playing on the version you
+// have is a real choice -- a map you are mid-way through, an update you do not
+// trust -- so it stays on offer, and taking it is remembered for the session.
+void mods_outdated_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, Ui& ui, ModsPanel& panel) {
+    if (!panel.scanned) scan(panel, launcher.session());
+    const auto installed = installed_versions(panel.list);
+    const auto pending = updates(panel.store, installed);
+    // Nothing left to update (an update ran, or the listing changed): just go.
+    if (pending.empty()) {
+        ui.mods_update_prompt = false;
+        launcher.play();
+        return;
+    }
+    const bool one = pending.size() == 1;
+    const auto frame = begin_panel("##mods_outdated_panel", size,
+        ImVec2(S(600), std::min(size.y - S(80), S(250) + static_cast<float>(pending.size()) * S(44))));
+    panel_title(fonts, one ? "A MOD HAS AN UPDATE" : "MODS HAVE UPDATES");
+    ImGui::PushTextWrapPos(0);
+    ImGui::TextDisabled(one ? "Thunderstore has a newer version of this mod."
+                            : "Thunderstore has newer versions of these mods.");
+    ImGui::PopTextWrapPos();
+    ImGui::Spacing();
+
+    const float footer = ImGui::GetFrameHeight() + S(44);
+    ImGui::BeginChild("##outdated_list", ImVec2(0, frame.y - ImGui::GetCursorPosY() - footer),
+        ImGuiChildFlags_Borders);
+    for (const auto* package : pending) {
+        const auto found = installed.find(thunderstore::folder_for(package->full_name));
+        ImGui::PushFont(fonts.bold);
+        ImGui::TextUnformatted(package->title().c_str());
+        ImGui::PopFont();
+        ImGui::SameLine();
+        if (found != installed.end() && !found->second.empty())
+            ImGui::TextDisabled("v%s  ->  v%s", found->second.c_str(), package->latest().number.c_str());
+        else
+            ImGui::TextDisabled("-> v%s", package->latest().number.c_str());
+        ImGui::Spacing();
+    }
+    ImGui::EndChild();
+
+    ImGui::SetCursorPosY(frame.y - S(24) - ImGui::GetFrameHeight());
+    push_primary_button();
+    const bool update = ImGui::Button(one ? "UPDATE IT AND PLAY" : "UPDATE THEM AND PLAY", ImVec2(S(230), 0));
+    pop_primary_button();
+    if (update) {
+        // The install panel lives on the mod manager page, so open it: an
+        // update with no sign of it running is the same as a dead button.
+        std::vector<thunderstore::Package> packages;
+        for (const auto* package : pending) packages.push_back(*package);
+        start_store_install(panel, std::move(packages));
+        // Only promise the launch if the install really started.
+        ui.play_after_install = panel.installing;
+        ui.mods_update_prompt = false;
+        ui.mods = true;
+        panel.tab = 0;
+    }
+    ImGui::SameLine(0, S(8));
+    if (ImGui::Button("Open Mod Manager", ImVec2(S(160), 0))) {
+        ui.mods_update_prompt = false;
+        ui.mods = true;
+        panel.tab = 0;
+        panel.scanned = false;
+    }
+    ImGui::SameLine(frame.x - S(28) - S(110));
+    if (ImGui::Button("Play anyway", ImVec2(S(110), 0))) {
+        ui.mods_update_prompt = false;
+        ui.mods_updates_ignored = true;   // asked and answered; do not nag again
+        launcher.play();
+    }
+    ImGui::End();
+}
+
 void mods_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, Ui& ui, ModsPanel& panel, HWND window) {
     const auto& session = launcher.session();
     if (!panel.scanned) scan(panel, session);
@@ -595,7 +667,12 @@ void mods_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, Ui& ui, Mo
     auto& entries = panel.list.entries;
     const auto installed = installed_versions(panel.list);
     const auto pending = updates(panel.store, installed);
-    const auto close = [&] { ui.mods = false; panel.message.clear(); panel.scanned = false; };
+    const auto close = [&] {
+        ui.mods = false;
+        panel.message.clear();
+        panel.scanned = false;
+        ui.play_after_install = false;   // leaving the page is a change of mind
+    };
 
     // The page covers the main screen's buttons, so it draws its own.
     window_buttons(draw, window, frame);
@@ -695,6 +772,20 @@ void mods_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, Ui& ui, Mo
     g_drag_allowed = !ImGui::IsAnyItemHovered() && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId);
     ImGui::End();
     if (installing) install_modal(fonts, panel, frame);
+    // collect_install at the top of this frame has already taken the result, so
+    // an install that is no longer running is settled: go and play, as the
+    // button that sent us here said it would.
+    if (ui.play_after_install && !panel.installing) {
+        ui.play_after_install = false;
+        if (panel.message_error) {
+            // It failed. Stay on the page, with the reason still on screen.
+            logging::write(logging::Level::warning, logging::Channel::launcher,
+                "Not launching after the mod update: " + panel.message);
+        } else {
+            close();
+            launcher.play();
+        }
+    }
 }
 
 } // namespace dingosdk::launcher_gui::detail

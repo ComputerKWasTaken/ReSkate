@@ -141,7 +141,7 @@ void draw_plate(ImDrawList* draw, const Fonts& fonts, ImVec2 position, const std
 
 // The big action tile: blue like skate.'s selected tile, grey and scribbled when locked.
 bool action_tile(ImDrawList* draw, const Fonts& fonts, ImVec2 position, ImVec2 size, const char* label,
-                 const std::string& detail, bool enabled, bool secondary) {
+                 const std::string& detail, bool enabled, bool secondary, const std::string& mark = {}) {
     bool hovered{};
     const bool pressed = tile_hit("##primary", position, size, enabled, hovered);
     const ImVec2 end(position.x + size.x, position.y + size.y);
@@ -154,6 +154,10 @@ bool action_tile(ImDrawList* draw, const Fonts& fonts, ImVec2 position, ImVec2 s
     if (!detail.empty())
         draw->AddText(fonts.bold, fonts.bold->FontSize, ImVec2(position.x + S(20), end.y - S(20) - fonts.bold->FontSize),
             blue ? rgba(0, 0, 0, 0.72f) : color::muted, detail.c_str(), nullptr, size.x - S(40));
+    // On the blue tile a dark pill reads; on a grey one the usual blue does.
+    if (!mark.empty())
+        badge(draw, fonts, ImVec2(end.x - S(20) - badge_width(fonts, mark), position.y + S(20)), mark,
+            blue ? rgba(0, 0, 0, 0.34f) : color::blue, blue ? color::text : color::ink);
     return pressed;
 }
 
@@ -381,7 +385,7 @@ void frame(Launcher& launcher, const Fonts& fonts, HWND window, Ui& ui, ModsPane
         }
     }
     const bool modal = ui.settings || ui.mods || ui.sign_in || qr_open || state.prompt.has_value() ||
-        ui.steam_offline || state.phase == Phase::mods_broken;
+        ui.steam_offline || state.phase == Phase::mods_broken || ui.mods_update_prompt;
 
     ImGui::SetNextWindowPos(ImVec2(0, 0));
     ImGui::SetNextWindowSize(size);
@@ -445,12 +449,20 @@ void frame(Launcher& launcher, const Fonts& fonts, HWND window, Ui& ui, ModsPane
         case Phase::game_missing:
         case Phase::game_outdated: open_sign_in(launcher, ui, false); break;
         case Phase::downloading: launcher.cancel(); break;
-        case Phase::ready: launcher.play(); break;
+        case Phase::ready:
+            // Mods with updates waiting: ask first, once a session. Playing on
+            // the old version is a choice, not a mistake, so it stays offered.
+            if (ui.mods_pending && !ui.mods_updates_ignored) ui.mods_update_prompt = true;
+            else launcher.play();
+            break;
         case Phase::failed: launcher.check(); break;
         default: break;
         }
     };
-    if (action_tile(draw, fonts, primary, primary_size, label, detail, enabled && !modal, secondary)) act();
+    const auto play_mark = state.phase == Phase::ready && ui.mods_pending
+        ? (ui.mods_pending == 1 ? std::string("1 MOD UPDATE") : std::format("{} MOD UPDATES", ui.mods_pending))
+        : std::string();
+    if (action_tile(draw, fonts, primary, primary_size, label, detail, enabled && !modal, secondary, play_mark)) act();
     if (settings_tile(draw, fonts, settings, ImVec2(column, S(84)), !modal)) ui.settings = true;
     if (time - ui.mods_checked > 5 && !ui.mods) {
         std::size_t enabled_mods = 0, installed = 0;
@@ -466,6 +478,7 @@ void frame(Launcher& launcher, const Fonts& fonts, HWND window, Ui& ui, ModsPane
             if (entry.enabled && (list.excluded.contains(entry.mod.name) || !entry.mod.outdated.empty()))
                 dropped.push_back(entry.mod.title);
         const auto pending = updates(mods_panel.store, installed_versions(list)).size();
+        ui.mods_pending = pending;
         ui.mods_mark_bad = !dropped.empty();
         ui.mods_mark = !dropped.empty() ? std::string("NOT LOADED")
                      : pending == 1 ? std::string("1 UPDATE")
@@ -499,6 +512,7 @@ void frame(Launcher& launcher, const Fonts& fonts, HWND window, Ui& ui, ModsPane
     else if (ui.mods) mods_window(launcher, fonts, size, ui, mods_panel, window);
     else if (state.phase == Phase::mods_broken)
         mods_broken_window(launcher, fonts, size, ui, mods_panel, state.mod_problems);
+    else if (ui.mods_update_prompt) mods_outdated_window(launcher, fonts, size, ui, mods_panel);
     else if (ui.steam_offline) steam_offline_window(fonts, size, ui);
 }
 

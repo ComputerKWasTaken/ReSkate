@@ -304,6 +304,14 @@ struct Ui {
     // Its badge: updates waiting, or mods that did not load, which wins.
     std::string mods_mark;
     bool mods_mark_bad{};
+    // Thunderstore updates waiting, so PLAY can say so and ask before it
+    // launches without them. Answered once a session.
+    std::size_t mods_pending{};
+    bool mods_update_prompt{};
+    bool mods_updates_ignored{};
+    // "Update them and play" said play: launch once the install finishes.
+    // Cleared by leaving the page or by an install that failed.
+    bool play_after_install{};
     double mods_checked{-100};
     // Steam display name for the name plate, re-read every few seconds.
     std::string steam_name;
@@ -440,6 +448,8 @@ void mods_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, Ui& ui, Mo
 // Shown instead of launching when the merge left mods out.
 void mods_broken_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, Ui& ui, ModsPanel& panel,
                         const std::vector<ModProblem>& problems);
+// Shown instead of launching while mods have Thunderstore updates waiting.
+void mods_outdated_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, Ui& ui, ModsPanel& panel);
 
 // The main screen: background, tiles, status and whichever panel is open.
 void frame(Launcher& launcher, const Fonts& fonts, HWND window, Ui& ui, ModsPanel& mods_panel);
