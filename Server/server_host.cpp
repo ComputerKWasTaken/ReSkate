@@ -780,6 +780,8 @@ std::string Host::command(std::string_view line, std::uint64_t admin) {
     const auto target = [&](std::string_view text) -> Guest * {
         // A SteamID64 (optionally followed by the player's session epoch, as the
         // in-game menu sends it), or the start of a connected player's name.
+        // Every name starts with "", so a bare `kick` would pick the only player.
+        if (text.empty()) return nullptr;
         const auto [first, rest] = split(text);
         (void)rest;
         if (const auto id = number(first)) return find(*id);
