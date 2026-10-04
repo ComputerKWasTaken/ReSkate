@@ -8,6 +8,7 @@
 #include "Engine/Game/Build/addresses.h"
 #include "Engine/Game/Build/20260929/engine.h"
 #include "Engine/Game/Build/20260929/local_music.h"
+#include "Engine/Game/World/location_travel.h"
 #include "Extension/Profile/runtime_internal.h"
 
 namespace dingosdk::profile_runtime {
@@ -106,14 +107,18 @@ bool music_ui_catalog_valid(const MusicCatalog& catalog, const std::string& favo
 }
 
 std::string music_ui_wire(std::string_view id, std::string_view artist, std::string_view title,
-    const std::vector<std::string>* members) {
+    const std::vector<std::string>* members, std::string_view name, std::string_view artwork) {
     std::string body, presentation, framed;
     cosmetic_wire_string(body, 1, id);
     if (members) {
         for (const auto& song : *members) cosmetic_wire_string(body, 2, song);
         // A local shelf choice for real authored groups, NOT recovered AMP classification.
         cosmetic_wire_number(body, 3, 1);
-        cosmetic_wire_string(presentation, 10, id);
+        // The catalogue's display name when known; the raw id otherwise.
+        cosmetic_wire_string(presentation, 10, name.empty() ? id : name);
+        // Artwork: the catalogue's cdn:/ id, resolved to the CDN rendition.
+        if (const auto url = travel_artwork_url(artwork); !url.empty())
+            cosmetic_wire_string(presentation, 11, url);
         cosmetic_wire_number(presentation, 12, 0);
     } else {
         cosmetic_wire_string(presentation, 10, artist);
@@ -236,7 +241,7 @@ void update_music_catalog() {
         ui.functions.allocator[1] = arena;
         MusicUiMessages playlists, songs;
         playlists.items.reserve(catalog.playlists.size()); songs.items.reserve(catalog.songs.size());
-        for (const auto& playlist : catalog.playlists) playlists.items.push_back(music_ui_message(music_ui_wire(playlist.id, {}, {}, &playlist.songs), true));
+        for (const auto& playlist : catalog.playlists) playlists.items.push_back(music_ui_message(music_ui_wire(playlist.id, {}, {}, &playlist.songs, playlist.name, playlist.artwork), true));
         for (const auto& song : catalog.songs) songs.items.push_back(music_ui_message(music_ui_wire(song.id, song.artist, song.title, nullptr), false));
         auto& model = game::native_data().models; auto& field = game::native_data().models.field;
         if (!music_ui_current(*pending)) { retry = false; return; }

@@ -9,6 +9,8 @@ struct MusicSong {
 
 struct MusicPlaylist {
     std::string id;
+    std::string name;    // display name from the content cache; empty for native groups
+    std::string artwork; // cdn:/ artwork id from the content cache; empty when unknown
     std::vector<std::string> songs;
 };
 

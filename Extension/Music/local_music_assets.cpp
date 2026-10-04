@@ -1,8 +1,12 @@
 #include "Extension/Customization/local_customization_runtime.h"
 #include "local_music_assets.h"
+#include "Engine/Core/Log/logging.h"
 #include "Engine/Game/Build/addresses.h"
 #include "Engine/Game/Build/20260929/local_music.h"
+#include "Engine/Vfs/content_catalogs.h"
 #include "Extension/Profile/runtime_internal.h"
+#include <iterator>
+#include <sstream>
 
 namespace dingosdk::profile_runtime {
 // Snapshot the game's registered music assets, as the cosmetic catalog does
@@ -102,6 +106,46 @@ bool read_music_catalog(MusicCatalog& result) {
     if (visited.size() != count || !read(base + addr::local_music::asset_manager, current) || current != manager ||
         !read(manager + 0x78, current_buckets) || current_buckets != buckets ||
         !read(manager + 0x84, current_count) || current_count != count) return false;
+    // The registered assets only declare the playlists the game ships offline
+    // (the Universal production library); the licensed stations live in the
+    // content-cache music chunk. Merge that membership, intersected with the
+    // songs actually registered, so no unregistered id can ever be referenced.
+    const auto native_playlists = playlists.size();
+    const auto& cache = content_cache::catalogs();
+    std::map<std::string, std::string, std::less<>> playlist_names, playlist_artwork;
+    std::size_t cache_playlists = 0, matched = 0, unmatched = 0, added = 0;
+    if (!cache.music_playlists.empty()) {
+        std::map<std::string, std::size_t, std::less<>> index;
+        for (std::size_t i = 0; i < snapshot.songs.size(); ++i) index.emplace(snapshot.songs[i].id, i);
+        for (const auto& [id, entry] : cache.music_playlists) {
+            ++cache_playlists;
+            auto& members = playlists[id];
+            for (const auto& track : entry.tracks) {
+                const auto found = index.find(track);
+                if (found == index.end()) { ++unmatched; continue; }
+                ++matched;
+                auto& song = snapshot.songs[found->second];
+                if (std::find(song.playlists.begin(), song.playlists.end(), id) != song.playlists.end())
+                    continue;
+                song.playlists.push_back(id);
+                members.push_back(song.id);
+                ++added;
+            }
+            if (!members.empty() && !entry.name.empty()) playlist_names[id] = entry.name;
+            if (!members.empty() && !entry.artwork.empty()) playlist_artwork[id] = entry.artwork;
+        }
+        for (auto it = playlists.begin(); it != playlists.end();)
+            it = it->second.empty() ? playlists.erase(it) : std::next(it);
+    }
+    {
+        std::ostringstream event;
+        event << "{\"event\":\"music_catalog_membership\",\"songs\":" << snapshot.songs.size()
+              << ",\"native_playlists\":" << native_playlists
+              << ",\"cache_playlists\":" << cache_playlists
+              << ",\"matched\":" << matched << ",\"unmatched\":" << unmatched
+              << ",\"added\":" << added << ",\"playlists\":" << playlists.size() << "}";
+        dingosdk::logging::event(dingosdk::logging::Channel::music, event.str());
+    }
     // Registry order is bucket order, not authored ordering. Use stable IDs for
     // deterministic UI order; do not claim this is the original service order.
     std::sort(snapshot.songs.begin(), snapshot.songs.end(), [](const auto& a, const auto& b) {
@@ -109,7 +153,14 @@ bool read_music_catalog(MusicCatalog& result) {
     });
     for (auto& [id, songs] : playlists) {
         std::sort(songs.begin(), songs.end());
-        snapshot.playlists.push_back({id, std::move(songs)});
+        MusicPlaylist row;
+        row.id = id;
+        row.songs = std::move(songs);
+        if (const auto found = playlist_names.find(id); found != playlist_names.end())
+            row.name = found->second;
+        if (const auto found = playlist_artwork.find(id); found != playlist_artwork.end())
+            row.artwork = found->second;
+        snapshot.playlists.push_back(std::move(row));
     }
     result = std::move(snapshot);
     return true;
