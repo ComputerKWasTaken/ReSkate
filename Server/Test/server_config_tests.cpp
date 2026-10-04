@@ -68,6 +68,22 @@ int run() {
     const auto odd = load_config(file);
     check(odd.score_check == "warn" && odd.score_allow == std::vector<std::uint64_t>{0xabc}, "Bad scoring settings not cleaned");
 
+    // A port outside 1-65535 is refused, not wrapped to another port, and the file keeps the typo.
+    const auto refused = [&](const char *json) {
+        std::ofstream(file, std::ios::binary) << json;
+        try {
+            static_cast<void>(load_config(file));
+        } catch (const std::exception &) {
+            return text(file) == json;
+        }
+        return false;
+    };
+    check(refused(R"({"query_port": 70000})") && refused(R"({"port": 65536})") && refused(R"({"port": 0})"),
+          "An out-of-range port was accepted or the file rewritten");
+    std::ofstream(file, std::ios::binary) << R"({"port": 65535, "query_port": 1})";
+    const auto edges = load_config(file);
+    check(edges.port == 65535 && edges.query_port == 1, "Ports at the ends of the range refused");
+
     std::filesystem::remove_all(folder);
     if (failures) return 1;
     std::cout << "server config: ok\n";
