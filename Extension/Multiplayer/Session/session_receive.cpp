@@ -458,6 +458,7 @@ void networking(Session &s, const NativeFrame &local, std::uint64_t now) {
                 s.travel_started = s.join_started = now;
                 s.join_destination.clear();
                 s.map_name.clear();
+                s.map_label.clear();
                 s.map = 0;
                 s.map_load_submitted = false;
                 s.last_map_load_check = 0;
@@ -469,6 +470,7 @@ void networking(Session &s, const NativeFrame &local, std::uint64_t now) {
             s.world_state_sequence = p.sequence;
             if (!p.destination.empty()) {
                 s.join_destination = s.map_name = p.destination;
+                s.map_label = p.map_label;
                 s.map = p.map;
             }
             s.host_world_ready = p.world_ready;
@@ -567,6 +569,7 @@ void networking(Session &s, const NativeFrame &local, std::uint64_t now) {
             link->password_challenge = p.challenge;
             link->map_authorized |= p.map_authorized;
             s.join_destination = p.destination;
+            s.map_label = p.map_label;
             s.world = p.world;
             s.join_map_authorized |= p.map_authorized;
             if (new_challenge)
@@ -749,6 +752,9 @@ void networking(Session &s, const NativeFrame &local, std::uint64_t now) {
         if (p.kind == PacketKind::maps) {
             if (dedicated_host(s) && message.peer == s.host_id && p.source == s.host_id) {
                 s.server_maps = p.maps;
+                s.server_map_pool.clear();
+                for (const auto entry : p.map_pool) s.server_map_pool.push_back(p.maps[entry]);
+                s.server_map_rotation = p.map_rotation;
                 publish(s);
                 publish_chat(s);
             }

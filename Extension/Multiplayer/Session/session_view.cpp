@@ -214,6 +214,9 @@ void publish(Session &s, const NativeFrame *local) {
         view.server_bans = true;
         view.server_ban_total = s.server_ban_total;
         view.server_maps = s.server_maps;
+        view.server_map_pool = s.server_map_pool;
+        view.server_map_rotation = s.server_map_rotation;
+        view.server_map_votes = (s.server_votes & server_vote_map) != 0;
     }
     view.chat_visible = s.chat_visible;
     view.chat_filter = s.chat_filter;
@@ -447,6 +450,8 @@ std::vector<MultiplayerChatCommand> chat_commands(const Session &s) {
             list.push_back({"/tod", "/tod <time>", "Admin: set the time of day", "time"});
             list.push_back({"/votes", "/votes [map|kick|tod on|off|<percent>]", "Admin: the server's vote settings"});
             list.push_back({"/vote-cancel", "/vote-cancel", "Admin: stop the running vote"});
+            list.push_back({"/map-pool", "/map-pool [add|remove <map>|clear]", "Admin: the maps players vote between and the rotation uses"});
+            list.push_back({"/rotation", "/rotation [<minutes>|off]", "Admin: change the map on a timer, through the map pool"});
         }
     }
     return list;

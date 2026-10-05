@@ -208,6 +208,10 @@ struct Session {
     std::vector<MultiplayerBan> server_bans;
     std::uint32_t server_ban_total{};
     std::vector<std::string> server_maps; // level assets the dedicated server allows
+    std::vector<std::string> server_map_pool; // admins: the pool's assets in rotation order (empty: every map)
+    unsigned server_map_rotation{};           // minutes per map (0: off)
+    std::string map_label;                    // the host's name for join_destination (may be empty)
+    std::string leave_notice;                 // take_leave_notice()
     std::uint64_t joined_public_lobby{};
     std::array<Peer, max_remote_players> peers;
     // Players take the lowest free slots, so every one sits below this mark

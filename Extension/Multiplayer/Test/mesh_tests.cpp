@@ -1254,7 +1254,7 @@ struct MapPair {
     static MapLoadResult loader(std::string_view, bool submitted, std::string &detail) {
         if (missing) {
             detail = "Map not installed.";
-            return MapLoadResult::failed;
+            return MapLoadResult::missing;
         }
         if (!submitted) ++loads;
         return submitted ? MapLoadResult::waiting : MapLoadResult::queued;
@@ -1365,8 +1365,9 @@ void map_checks() {
         MapPair pair;
         MapPair::missing = true;
         pair.run(20);
-        check(pair.guest.mode == Mode::off && pair.guest.status == "Map not installed.",
-              "Missing map did not end the pending join with its error");
+        const auto said = "The host is on Beach, which is not installed on this PC. Install its map mod and join again.";
+        check(pair.guest.mode == Mode::off && pair.guest.status == said && pair.guest.leave_notice == said,
+              "Missing map did not end the pending join naming the map");
     }
     {
         MapPair pair;
