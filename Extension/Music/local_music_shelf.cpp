@@ -188,6 +188,8 @@ std::string music_shelf_append_one(std::uintptr_t base, std::uintptr_t model, st
 }
 
 
+// CONFIRMED: the authored loader calls the shared constructor at RVA 0x1912670.
+// The return path exposes the shelf list before its native widgets bind.
 MusicModelConstruct music_model_construct_original{};
 std::uint64_t music_model_construct_hook(std::uintptr_t manager, std::uint8_t mode,
     std::uint64_t id, std::uintptr_t type, bool flag, std::uintptr_t record) {

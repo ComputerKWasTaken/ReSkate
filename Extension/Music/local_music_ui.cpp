@@ -29,9 +29,6 @@ void music_release_weak(std::uintptr_t owner) noexcept {
 
 MusicUiRuntime& music_ui_runtime() { static auto* r = new MusicUiRuntime; return *r; }
 
-
-// CONFIRMED: the authored loader calls the shared constructor at RVA 0x1912670.
-// The return path exposes the shelf list before its native widgets bind.
 bool initialize_music_functions(std::uintptr_t base) {
     namespace music = addr::local_music;
     for (const auto& fp : music::music_ui_contracts) {
