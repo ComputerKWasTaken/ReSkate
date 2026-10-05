@@ -47,6 +47,7 @@ constexpr std::string_view help_text =
     "tps 20|30|60|120 | voice on|off | voice-range <50-1000> | distances <full> <half> <half-return> <low>\n"
     "placement everyone|admins|nobody | clear-objects | noclip on|off | nobail on|off | boosts on|off | tuning on|off\n"
     "tpall [player] | tphere <player> | votes [map|kick|tod on|off|<percent>] | vote-cancel\n"
+    "map-pool [add|remove <map>|clear] | rotation [<minutes>|off]\n"
     "park <lot> <layout> | layer-sync on|off | layer <key> default|on|off | tod <time|default>\n"
     "activity-log on|off | announce-throwdowns on|off | parties [on|off] | party-size <2-8> | speed-check off|warn|kick\n"
     "score-check [off|warn|kick] | score-allow [<fingerprint>|remove <fingerprint>]\n"
@@ -322,12 +323,16 @@ void Host::send_bans(Guest &admin) {
     }
     if (send_packet(admin, list, true, false)) admin.bans_sent = bans_revision_;
 }
-// The maps an admin may switch to: the retail ones and the server's custom maps.
-void Host::send_maps(Guest &admin) {
+void Host::send_maps(Guest &guest) { // admins: every map; players: the pool
     auto list = packet(PacketKind::maps, now_);
-    for (const auto &level : levels())
+    const auto add = [&](const ServerLevel &level) {
         if (valid_map_asset(level.asset) && list.maps.size() < max_server_maps) list.maps.push_back(level.asset);
-    if (send_packet(admin, list, true, false)) admin.maps_sent = true;
+    };
+    if (is_admin(guest.member.id))
+        for (const auto &level : levels()) add(level);
+    else
+        for (const auto *level : pool_levels(config_)) add(*level);
+    if (send_packet(guest, list, true, false)) guest.maps_sent = true;
 }
 void Host::change_map(std::string_view map) {
     if (!valid_map_destination(map_destination(map_setting(map))))
@@ -361,6 +366,8 @@ void Host::change_map(std::string_view map) {
     activity_.clear(); // throwdowns end with the world
     config_.map = map_setting(map);
     map_ = map_hash(map_destination(config_.map));
+    map_since_ = now_;
+    rotation_warned_ = false;
     travel_started_ = now_;
     last_world_state_ = 0;
     send_world_state();
@@ -807,6 +814,7 @@ void Host::tick(std::uint64_t now) {
     activity_.tick(now_);
     if (std::exchange(vote_recount_, false)) check_vote(false);
     if (vote_ && now_ >= vote_->ends) check_vote(true);
+    tick_rotation();
     std::erase_if(vote_cooldowns_, [&](const auto &entry) { return now_ >= entry.second; });
     join_backoff_.prune(now_);
 }
@@ -914,8 +922,50 @@ std::string Host::command(std::string_view line, std::uint64_t admin) {
     }
     if (name == "maps") {
         std::string text = std::to_string(levels().size()) + " maps (custom maps come from Mods next to the server)";
-        for (const auto &level : levels()) text += "\n  " + level.name + (same_map(level.asset) ? "  (now)" : "");
+        for (const auto &level : levels())
+            text += "\n  " + level.name + (same_map(level.asset) ? "  (now)" : "") +
+                    (!config_.map_pool.empty() && in_map_pool(config_, level.asset) ? "  (pool)" : "");
         return text;
+    }
+    if (name == "map-pool") { // map-pool [add|remove <map>|clear]
+        const auto [what_text, map] = split(argument);
+        const auto what = lower(what_text);
+        if (what.empty()) return pool_text();
+        if (what == "clear") {
+            config_.map_pool.clear();
+            resend_maps();
+            return changed("The map pool is cleared: players vote between every map, and the rotation goes through them all.");
+        }
+        if (what != "add" && what != "remove") return "map-pool [add|remove <map>|clear]";
+        const auto *level = find_level(map);
+        if (!level || !valid_map_destination(map_destination(level->asset)))
+            return "No single map is called \"" + std::string(map) + "\". Type maps for the list.";
+        const auto pooled = [&](const std::string &entry) { return find_level(entry) == level; };
+        const bool listed = std::any_of(config_.map_pool.begin(), config_.map_pool.end(), pooled);
+        if (what == "add") {
+            if (listed || config_.map_pool.empty()) return level->name + " is already in the map pool.";
+            config_.map_pool.push_back(level->name);
+        } else {
+            if (config_.map_pool.empty()) // every map: keep all the others
+                for (const auto *other : pool_levels(config_)) config_.map_pool.push_back(other->name);
+            else if (!listed) return level->name + " is not in the map pool.";
+            if (std::all_of(config_.map_pool.begin(), config_.map_pool.end(), pooled))
+                return "The map pool needs at least one map. map-pool clear allows every map again.";
+            std::erase_if(config_.map_pool, pooled);
+        }
+        resend_maps();
+        return changed(level->name + (what == "add" ? " added to" : " removed from") + " the map pool.");
+    }
+    if (name == "rotation") { // rotation [<minutes>|off]
+        if (argument.empty()) return rotation_text();
+        const auto value = lower(argument);
+        const auto minutes = value == "off" ? std::optional<std::uint64_t>(0) : number(value);
+        if (!minutes || *minutes > 1440) return "rotation <1-1440 minutes>|off";
+        config_.map_rotation = static_cast<unsigned>(*minutes);
+        map_since_ = now_;
+        rotation_warned_ = false;
+        resend_maps();
+        return changed(rotation_text());
     }
     if (name == "name") {
         if (argument.empty() || argument.size() > 64 || !valid_member_name(argument)) return "Server names are 1 to 64 characters.";
@@ -1292,10 +1342,12 @@ std::string Host::command(std::string_view line, std::uint64_t admin) {
         if (!individual_steam_id(id)) return "admin add|remove <player or SteamID64>";
         if (sub == "add") {
             if (!is_admin(id)) config_.admins.push_back(id);
+            resend_maps();
             return changed(std::to_string(id) + " is an admin.");
         }
         if (sub == "remove") {
             std::erase(config_.admins, id);
+            resend_maps();
             return changed(std::to_string(id) + " is no longer an admin.");
         }
         return "admin add|remove <player or SteamID64>";
