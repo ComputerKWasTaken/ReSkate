@@ -15,6 +15,24 @@
 #include <utility>
 
 namespace dingosdk::profile_runtime {
+
+// Runtime-only music UI hydration: read_music_catalog copies actual registered
+
+// MusicGraphAsset metadata/TagRefs. No generated catalog, guessed memberships,
+
+// artwork, audio-residency gate, or preference persistence. Bounds: 1024 songs,
+
+// 256 authored groups, 8192 membership edges. Include after assets/news/model helpers.
+
+void music_release_weak(std::uintptr_t owner) noexcept {
+    if (owner && InterlockedDecrement(reinterpret_cast<volatile LONG*>(owner + 12)) == 0) {
+        const auto table = *reinterpret_cast<const std::uintptr_t**>(owner);
+        reinterpret_cast<void (*)(void*)>(table[2])(reinterpret_cast<void*>(owner));
+    }
+}
+
+MusicUiRuntime& music_ui_runtime() { static auto* r = new MusicUiRuntime; return *r; }
+
 namespace {
 // Format model handles for shelf publication logs.
 std::string music_diag_hex(std::uint64_t value, int width) {
@@ -186,22 +204,6 @@ std::string music_shelf_append_one(std::uintptr_t base, std::uintptr_t model, st
     return report;
 }
 }
-// Runtime-only music UI hydration: read_music_catalog copies actual registered
-
-// MusicGraphAsset metadata/TagRefs. No generated catalog, guessed memberships,
-
-// artwork, audio-residency gate, or preference persistence. Bounds: 1024 songs,
-
-// 256 authored groups, 8192 membership edges. Include after assets/news/model helpers.
-
-void music_release_weak(std::uintptr_t owner) noexcept {
-    if (owner && InterlockedDecrement(reinterpret_cast<volatile LONG*>(owner + 12)) == 0) {
-        const auto table = *reinterpret_cast<const std::uintptr_t**>(owner);
-        reinterpret_cast<void (*)(void*)>(table[2])(reinterpret_cast<void*>(owner));
-    }
-}
-
-MusicUiRuntime& music_ui_runtime() { static auto* r = new MusicUiRuntime; return *r; }
 
 // CONFIRMED: the authored loader calls the shared constructor at RVA 0x1912670.
 // The return path exposes the shelf list before its native widgets bind.
