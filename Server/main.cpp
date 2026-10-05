@@ -191,6 +191,9 @@ struct Input {
             }
             for (ssize_t i = 0; i < count; ++i) {
                 if (buffer[i] == '\n') {
+                    // CRLF input (a script saved on Windows, a panel or telnet): without
+                    // this, "quit\r" is an unknown command and the server keeps running.
+                    if (!pending.empty() && pending.back() == '\r') pending.pop_back();
                     std::lock_guard lock(mutex);
                     lines.push_back(pending);
                     pending.clear();
