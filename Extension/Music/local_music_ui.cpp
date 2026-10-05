@@ -3,6 +3,7 @@
 #include "Extension/Customization/local_customization_runtime.h"
 #include "Extension/Customization/local_player_card_runtime.h"
 #include "local_music_assets.h"
+#include "local_music_safety.h"
 #include "local_music_ui.h"
 #include "Engine/Game/Abi/native_data.h"
 #include "Engine/Game/Build/addresses.h"
@@ -42,6 +43,10 @@ bool initialize_music_functions(std::uintptr_t base) {
     if (!read(base + music::playlist_control_vtable, playlist) || !read(base + music::song_control_vtable, song) ||
         playlist != rebased(music::playlist_control_slots) ||
         song != rebased(music::song_control_slots)) return false;
+    // Guard the native playlist walk before any mod song can reach it. A failed
+    // install leaves music usable; the crash guard is a safety net, not a gate.
+    if (!install_playlist_lookup_safety(base))
+        logging::event(logging::Channel::music, "{\"event\":\"music_playlist_lookup_safety_failed\"}");
     auto& f = music_ui_runtime().functions;
     f.construct_playlist = reinterpret_cast<decltype(f.construct_playlist)>(base + music::construct_playlist);
     f.construct_song = reinterpret_cast<decltype(f.construct_song)>(base + music::construct_song);
