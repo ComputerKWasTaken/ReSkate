@@ -523,8 +523,15 @@ bool initialize_local_profile(std::uintptr_t base, bool authored_offline,
         hook(news_list_contract, &news_list_hook, news_runtime().functions.list);
         hook(news_subscribe_contract, &news_subscribe_hook, news_runtime().functions.subscribe);
         hook(object_subscribe_contract, &object_categories_hook, object_runtime().functions.subscribe);
-        if (music_ready)
+        if (music_ready) {
             hook(music_ui_initialize_contract, &music_ui_initialize_hook, music_ui_runtime().functions.initialize);
+            std::array<unsigned char, 32> construct_bytes{};
+            if (read(base + music_model_construct_contract.rva, construct_bytes) &&
+                construct_bytes == music_model_construct_contract.bytes)
+                hook(music_model_construct_contract, &music_model_construct_hook, music_model_construct_original);
+            else dingosdk::logging::event(dingosdk::logging::Channel::music,
+                "{\"event\":\"music_model_construct_contract_mismatch\"}");
+        }
         hook(buildkit_text_exists_contract, &buildkit_text_exists, buildkit_text_functions().exists);
         hook(buildkit_text_translate_contract, &buildkit_text_translate, buildkit_text_functions().translate);
         hook(buildkit_grabber_settings_contract, &buildkit_grabber_settings_hook, buildkit_limits_runtime().grabber_settings);
