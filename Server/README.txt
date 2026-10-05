@@ -123,6 +123,11 @@ and change voice, distances, placement and kicks from the Multiplayer menu.
   status                        Name, map, players, code.
   players                       Connected players and their SteamID64s.
   say <text>                    Chat as the server (console only).
+  msg <player> <text>           Private message, shown to them as "[DM from <you>] ...".
+                                Name start (one word) or SteamID64.
+  msg-party <player> <text>     Message everyone in that player's party ("[DM from <you> to party]").
+  msg-admins <text>             Message every admin who is online ("[DM from <you> to admins]").
+                                Players can whisper each other with /w <player> <text> in chat.
   kick <player>                 Until the server restarts. Name start or SteamID64.
                                 Admins cannot kick or ban each other; the console can.
   ban <player or id> [name]     For good.   unban <id>   bans

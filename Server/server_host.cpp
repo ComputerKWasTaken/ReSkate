@@ -42,7 +42,7 @@ std::uint64_t nonce() {
     return value;
 }
 constexpr std::string_view help_text =
-    "status | players | say <text> | kick <player> | ban <player or SteamID64> [name] | unban <SteamID64> | bans\n"
+    "status | players | say <text> | msg <player> <text> | msg-party <player> <text> | msg-admins <text> | kick <player> | ban <player or SteamID64> [name] | unban <SteamID64> | bans\n"
     "map <name, e.g. San Vansterdam> | maps | name <text> | password <text|off> | welcome <text|off> | listed on|off\n"
     "tps 20|30|60|120 | voice on|off | voice-range <50-1000> | distances <full> <half> <half-return> <low>\n"
     "placement everyone|admins|nobody | clear-objects | noclip on|off | nobail on|off | boosts on|off | tuning on|off\n"
@@ -862,6 +862,41 @@ std::string Host::command(std::string_view line, std::uint64_t admin) {
         if (argument.empty()) return "say <text>";
         send_chat(argument);
         return "[chat] Server: " + clean_chat_text(argument);
+    }
+    if (name == "msg" || name == "msg-party" || name == "msg-admins") {
+        // Direct messages from the console or an admin, marked "[DM from ...]" so nobody takes them for chat.
+        const auto *sender = console ? nullptr : find(admin);
+        const std::string from = sender ? guest_name(*sender) : "Server";
+        const bool to_admins = name == "msg-admins";
+        const auto [who, text] = to_admins ? std::pair<std::string_view, std::string_view>{{}, trim(argument)} : split(argument);
+        if (text.empty()) return to_admins ? "msg-admins <text>" : name + " <player> <text>";
+        std::vector<Guest *> recipients;
+        std::string scope, label;
+        if (to_admins) {
+            scope = label = "admins";
+            for (auto &[id, guest] : guests_)
+                if (guest->handshaken && is_admin(id)) recipients.push_back(guest.get());
+        } else {
+            auto *guest = match_player(who);
+            if (!guest) return "No single connected player matches \"" + std::string(who) + "\".";
+            label = guest_name(*guest);
+            if (name == "msg") {
+                recipients.push_back(guest);
+            } else {
+                const auto *details = parties_.party(parties_.party_of(guest->member.id));
+                if (!details) return label + " is not in a party.";
+                scope = "party";
+                label += "'s party";
+                for (const auto member : details->members)
+                    if (auto *found = find(member); found && found->handshaken) recipients.push_back(found);
+            }
+        }
+        if (recipients.empty()) return "No admins are online.";
+        const auto line = dm_line(from, scope, text, multiplayer_chat_max_bytes);
+        for (auto *guest : recipients) send_chat(line, guest);
+        const auto done = "Sent to " + label + (recipients.size() > 1 || to_admins ? " (" + std::to_string(recipients.size()) + " players)" : "") + ".";
+        if (!console) log_("[dm] " + from + " -> " + label + ": " + clean_chat_text(text));
+        return done;
     }
     if (name == "kick") {
         auto *guest = target(argument);

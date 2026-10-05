@@ -68,13 +68,24 @@ void Host::chat_command(Guest &guest, std::string_view line) {
         if (votes & server_vote_time) text += "/vote tod <time>: vote for a time of day (morning, noon, night...)\n";
         if (votes) text += "/yes or /no: vote in the running vote\n";
         if (config_.parties) text += "/party: your party (invite, accept, leave...; /party help); /p <message>: party chat\n";
-        if (is_admin(guest.member.id)) text += "Admins: any server command as /<command>, e.g. /kick, /map, /tpall, /votes\n";
-        return reply(guest, text.empty() ? "This server has no player votes. Type /tp <player> to teleport." : text);
+        if (is_admin(guest.member.id)) text += "Admins: any server command as /<command>, e.g. /kick, /map, /tpall, /votes, /msg, /msg-party, /msg-admins\n";
+        const std::string whisper = "/w <player> <message>: send a private message";
+        return reply(guest, (text.empty() ? "This server has no player votes. Type /tp <player> to teleport.\n" : text) + whisper);
     }
     if (verb == "party") return party_command(guest, rest);
     if (verb == "p") {
         if (!config_.parties) return reply(guest, "Parties are off on this server.");
         return party_chat(guest, rest);
+    }
+    if (verb == "w" || verb == "whisper" || verb == "tell") {
+        // A private message to one player, marked "[DM from ...]"; the sender sees an echo.
+        const auto [who, text] = split(rest);
+        if (text.empty()) return reply(guest, "/w <player> <message>, e.g. /w player hello");
+        auto *other = match_player(who);
+        if (!other) return reply(guest, "No single connected player matches \"" + std::string(who) + "\".");
+        if (other == &guest) return reply(guest, "You cannot message yourself.");
+        send_chat(dm_line(guest_name(guest), {}, text, multiplayer_chat_max_bytes), other);
+        return reply(guest, "[DM to " + guest_name(*other) + "] " + clean_chat_text(text));
     }
     if (verb == "yes" || verb == "y") return cast_vote(guest, true);
     if (verb == "no" || verb == "n") return cast_vote(guest, false);
