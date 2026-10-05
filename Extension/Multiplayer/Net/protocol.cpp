@@ -367,6 +367,8 @@ std::vector<std::uint8_t> encode(const Packet &p, bool compact_pose, std::uint32
     if (p.kind == PacketKind::map_offer &&
         (!valid_map_destination(p.destination) || p.map != map_hash(p.destination)))
         throw std::invalid_argument("Invalid host map destination");
+    if ((p.kind == PacketKind::map_offer || p.kind == PacketKind::world_state) && !valid_map_label(p.map_label))
+        throw std::invalid_argument("Invalid map name");
     if (p.kind == PacketKind::world_state &&
         (p.destination.empty() ? (p.map != 0 || p.world_ready)
                                : (!valid_map_destination(p.destination) || p.map != map_hash(p.destination))))
@@ -409,6 +411,8 @@ std::vector<std::uint8_t> encode(const Packet &p, bool compact_pose, std::uint32
             w.integer(p.map_authorized ? 1 : 0, 1);
             w.integer(p.destination.size(), 2);
             w.bytes.insert(w.bytes.end(), p.destination.begin(), p.destination.end());
+            w.integer(p.map_label.size(), 1);
+            w.bytes.insert(w.bytes.end(), p.map_label.begin(), p.map_label.end());
         }
         if (p.kind == PacketKind::hello) {
             w.integer(p.text.size(), 1);
@@ -419,6 +423,8 @@ std::vector<std::uint8_t> encode(const Packet &p, bool compact_pose, std::uint32
         w.integer(p.world_ready ? 1 : 0, 1);
         w.integer(p.destination.size(), 2);
         w.bytes.insert(w.bytes.end(), p.destination.begin(), p.destination.end());
+        w.integer(p.map_label.size(), 1);
+        w.bytes.insert(w.bytes.end(), p.map_label.begin(), p.map_label.end());
     } else if (p.kind == PacketKind::world_ready) {
         w.integer(p.world_ready ? 1 : 0, 1);
     } else if (p.kind == PacketKind::pose) {
@@ -596,6 +602,13 @@ std::vector<std::uint8_t> encode(const Packet &p, bool compact_pose, std::uint32
         w.bytes[8 + i] = static_cast<std::uint8_t>(actual_payload >> (8 * i));
     return std::move(w.bytes);
 }
+static bool read_map_label(Reader &r, std::span<const std::uint8_t> bytes, Packet &p) {
+    const auto length = r.integer(1);
+    if (length > max_member_name || length > bytes.size() - r.at) return false;
+    p.map_label.assign(reinterpret_cast<const char *>(bytes.data() + r.at), static_cast<std::size_t>(length));
+    r.at += static_cast<std::size_t>(length);
+    return valid_map_label(p.map_label);
+}
 std::optional<Packet> decode(std::span<const std::uint8_t> bytes) noexcept {
     try {
         if (bytes.size() < header_size || bytes.size() > max_packet)
@@ -634,7 +647,7 @@ std::optional<Packet> decode(std::span<const std::uint8_t> bytes) noexcept {
                 p.destination.assign(reinterpret_cast<const char *>(bytes.data() + r.at),
                                      static_cast<std::size_t>(length));
                 r.at += static_cast<std::size_t>(length);
-                if (!valid_map_destination(p.destination) || p.map != map_hash(p.destination))
+                if (!valid_map_destination(p.destination) || p.map != map_hash(p.destination) || !read_map_label(r, bytes, p))
                     return {};
             }
             if (p.kind == PacketKind::hello) {
@@ -659,6 +672,7 @@ std::optional<Packet> decode(std::span<const std::uint8_t> bytes) noexcept {
                 if (p.destination.empty() ? (p.map != 0 || p.world_ready)
                                           : (!valid_map_destination(p.destination) || p.map != map_hash(p.destination)))
                     return {};
+                if (!read_map_label(r, bytes, p)) return {};
             }
         } else if (p.kind == PacketKind::pose) {
             const auto skater = r.integer(2), board = r.integer(2);
@@ -966,6 +980,9 @@ bool valid_member_name(std::string_view text) noexcept {
 bool valid_map_asset(std::string_view asset) noexcept {
     return !asset.empty() && asset.size() <= max_map_asset &&
            std::all_of(asset.begin(), asset.end(), [](char c) { return c > 32 && c < 127 && c != '|'; });
+}
+bool valid_map_label(std::string_view label) noexcept {
+    return label.empty() || (label.size() <= max_member_name && valid_member_name(label));
 }
 bool valid_map_pool(std::span<const std::uint16_t> pool, std::size_t maps) noexcept {
     if (pool.size() > maps) return false;

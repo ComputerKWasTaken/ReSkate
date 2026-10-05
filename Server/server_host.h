@@ -158,6 +158,7 @@ class Host {
     void send_bans(Guest &admin);
     void send_maps(Guest &admin);
     void change_map(std::string_view map); // a level name, level path or destination
+    std::string wire_map_label() const;
     bool same_map(std::string_view asset) const { return map_hash(map_destination(asset)) == map_; }
     bool accept_data(Guest &source, const Packet &);
     // `received_at`: the transport's arrival time for the message (TransportMessage::arrived).

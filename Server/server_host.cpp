@@ -127,6 +127,11 @@ void Host::save() {
 }
 std::string Host::invite() const { return format_invite({id_, secret_}); }
 std::string Host::map_name() const { return map_label(config_.map); }
+std::string Host::wire_map_label() const { // players without the map's mod still see its name
+    auto label = map_name();
+    cut_text(label, max_member_name);
+    return valid_map_label(label) ? label : std::string{};
+}
 unsigned Host::players() const {
     return static_cast<unsigned>(std::count_if(guests_.begin(), guests_.end(), [](const auto &g) { return g.second->handshaken; }));
 }
@@ -297,6 +302,7 @@ void Host::send_roster() {
 void Host::send_world_state() {
     auto state = packet(PacketKind::world_state, now_);
     state.destination = map_destination(config_.map);
+    state.map_label = wire_map_label();
     state.world_ready = true; // the server has nothing to load
     const auto bytes = encode_wire(state);
     for (auto &[id, guest] : guests_)
@@ -492,6 +498,7 @@ void Host::receive(std::uint64_t peer, std::span<const std::uint8_t> bytes, std:
         if (newly_authorized || !link->last_map_offer || now_ - link->last_map_offer >= 1000000) {
             auto offer = packet(PacketKind::map_offer, now_);
             offer.destination = map_destination(config_.map);
+            offer.map_label = wire_map_label();
             offer.challenge = link->password_challenge;
             offer.map_authorized = authorized;
             send_required(*link, encode_wire(offer));

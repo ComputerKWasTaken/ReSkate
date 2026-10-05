@@ -879,6 +879,17 @@ void dedicated_server_codec() {
     pooled.map_rotation = 20;
     const auto pool_list = decode_wire(encode_wire(pooled));
     check(pool_list && pool_list->map_pool == pooled.map_pool && pool_list->map_rotation == 20, "Server map pool or rotation lost");
+    Packet changed_map;
+    changed_map.kind = PacketKind::world_state; changed_map.session = 9; changed_map.epoch = 10; changed_map.source = server; changed_map.world = 2;
+    changed_map.destination = "Levels/Game/DingoLevel_Root/DingoLevel_Root|Levels/Game/dingolevel_reskate_momentumpark/x";
+    changed_map.map = map_hash(changed_map.destination);
+    changed_map.map_label = "Momentum Park";
+    const auto arrived = decode_wire(encode_wire(changed_map));
+    check(arrived && arrived->map_label == "Momentum Park" && arrived->destination == changed_map.destination,
+          "The map's name lost from a map change");
+    auto unnamed = changed_map;
+    unnamed.map_label.assign(max_member_name + 1, 'a');
+    check(reject(unnamed), "An overlong map name encoded");
     auto stray = maps;
     stray.map_pool = {2};
     check(reject(stray), "A map pool entry past the map list encoded");
