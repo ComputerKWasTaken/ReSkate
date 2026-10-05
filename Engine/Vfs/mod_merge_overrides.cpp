@@ -1,8 +1,11 @@
 #include "mod_merge_internal.h"
 #include "Engine/Resource/cas_codec.h"
 #include "Engine/Resource/ebx_document.h"
+#include "Engine/Resource/ebx_merge.h"
+#include "Engine/Resource/ebx_writer.h"
 
 #include <algorithm>
+#include <array>
 #include <set>
 #include <stdexcept>
 
@@ -68,15 +71,44 @@ AssetOverrides collect_asset_overrides(const std::vector<const Mod*>& mods,
                             candidates.push_back({lower(bundle.name), {mod->name, asset, payload(), lower(relative)}});
                             continue;
                         }
-                        auto& versions = out.changed[name];
-                        if (versions.contains(game_copy->second)) continue;
-                        const auto& change = versions.emplace(game_copy->second,
-                            AssetOverride{mod->name, asset.sha1, asset.originalSize, payload()}).first->second;
-                        ++changed;
+                        const auto encodedPayload = payload();
                         try {
-                            for (const auto& reference : decoded(change.encoded).imports)
+                            for (const auto& reference : decoded(encodedPayload).imports)
                                 imported.insert(reference.fileGuid);
                         } catch (const std::exception&) {}
+                        auto& versions = out.changed[name];
+                        const auto existing = versions.find(game_copy->second);
+                        if (existing == versions.end()) {
+                            versions.emplace(game_copy->second,
+                                AssetOverride{mod->name, asset.sha1, asset.originalSize, encodedPayload});
+                            ++changed;
+                        } else {
+                            try {
+                                std::size_t baseIndex = 0;
+                                while (baseIndex < gameListing->manifest.ebx.size() &&
+                                       lower(gameListing->manifest.ebx[baseIndex].name) != name)
+                                    ++baseIndex;
+                                if (gameListing->first + baseIndex < gameListing->files.size()) {
+                                    const auto& baseFile = gameListing->files[gameListing->first + baseIndex];
+                                    const auto baseBytes = store.read(baseRoot, baseFile.location, baseFile.offset, baseFile.size);
+                                    const auto baseDoc = decoded(baseBytes);
+                                    const auto existingDoc = decoded(existing->second.encoded);
+                                    const auto thisDoc = decoded(encodedPayload);
+                                    const std::array<const fb::ebx::Document*, 2> editDocs{&existingDoc, &thisDoc};
+                                    fb::ebx::MergeSummary summary;
+                                    auto combined = fb::ebx::merge_documents(baseDoc, editDocs, &summary);
+                                    if (summary.instances || summary.arrayEntries) {
+                                        const auto rebuilt = fb::ebx::write_document(combined);
+                                        existing->second.sha1 = sha1_of(rebuilt);
+                                        existing->second.originalSize = rebuilt.size();
+                                        existing->second.encoded = fb::encode_cas(rebuilt, {gameRoot});
+                                        existing->second.mod += " + " + mod->name;
+                                        for (const auto& reference : combined.imports)
+                                            imported.insert(reference.fileGuid);
+                                    }
+                                }
+                            } catch (const std::exception&) {}
+                        }
                     }
                     // Maps carry stock SkaterLoader too. Replacing it only in the game's
                     // bundles loses custom cosmetic material targets on a map transition.
