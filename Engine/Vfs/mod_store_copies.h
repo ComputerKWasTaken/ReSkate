@@ -24,8 +24,16 @@ struct Catalog;
 // does not change with its key, though. It still names the store item's
 // appearance preset, decal textures, object or gesture, and those are what this
 // check holds a mod's items against. A mod that adds such a copy is not loaded
-// at all: the merge leaves it out whole (mod_merge.cpp), with
-// mods::store_copies_problem as the reason.
+// at all: the merge leaves it out whole (mod_merge.cpp), as it does a mod that
+// cannot be merged.
+
+// All such a mod is told, in the launcher, the game and the log (which the
+// mod's author reads too): that it could not be merged, and this. Nothing of
+// what was looked for or found. The number is how ReSkate's own people tell it
+// from a mod that really is damaged; the log names the check by it as well,
+// when something could not be read for it.
+inline constexpr std::string_view store_copies_problem = "merge error 0x5343";
+inline constexpr std::string_view store_copies_check = "merge check 0x5343";
 
 // What an item is made of, whatever it is called. Lower-case; the lists sorted.
 struct ItemContent {

@@ -188,7 +188,7 @@ public:
             try {
                 own = fb::read_toc(read_file(mod.directory / fs::path(relative)));
             } catch (const std::exception& failure) {
-                note(mod.name + ": " + relative + " could not be read for the store item check (" + failure.what() + ")");
+                note(mod.name + ": " + relative + " could not be read for " + std::string(store_copies_check) + " (" + failure.what() + ")");
                 continue;
             }
             for (const auto& bundle : own.bundles) {
@@ -219,7 +219,7 @@ public:
                         }
                     }
                 } catch (const std::exception& failure) {
-                    note(mod.name + ": " + bundle.name + " could not be read for the store item check (" + failure.what() + ")");
+                    note(mod.name + ": " + bundle.name + " could not be read for " + std::string(store_copies_check) + " (" + failure.what() + ")");
                 }
             }
         }
@@ -247,7 +247,7 @@ public:
                     } catch (const std::exception&) {}
                 }
             } catch (const std::exception& failure) {
-                note("The game's " + bundle->name + " could not be read for the store item check (" + failure.what() + ")");
+                note("The game's " + bundle->name + " could not be read for " + std::string(store_copies_check) + " (" + failure.what() + ")");
             }
         }
         return read;
@@ -268,7 +268,7 @@ private:
         try {
             entry.document = fb::read_toc(read_file(path));
         } catch (const std::exception& failure) {
-            note("The game's " + std::string(relative) + " could not be read for the store item check (" + failure.what() + ")");
+            note("The game's " + std::string(relative) + " could not be read for " + std::string(store_copies_check) + " (" + failure.what() + ")");
             return nullptr;
         }
         for (const auto& bundle : entry.document.bundles) entry.index.emplace(lower(bundle.name), &bundle);
@@ -370,7 +370,7 @@ StoreCopies check_store_copies(const Catalog& catalog, const StoreItem& sold, st
         StoreItems game;
         result.game_items = scan.read_game(game, sold);
         if (!result.game_items) {
-            if (notes) notes->push_back("The game's own items could not be read, so mods were not checked for copies of store items");
+            if (notes) notes->push_back(std::string(store_copies_check) + " could not read the game's own files and did not run");
             return result;
         }
         for (const auto& [mod, items] : added) {
@@ -390,7 +390,7 @@ StoreCopies check_store_copies(const Catalog& catalog, const StoreItem& sold, st
             if (source.count) result.mods.push_back(std::move(source));
         }
     } catch (const std::exception& failure) {
-        if (notes) notes->push_back(std::string("Mods could not be checked for copies of store items: ") + failure.what());
+        if (notes) notes->push_back(std::string(store_copies_check) + " could not run: " + failure.what());
         result = {};
     } catch (...) {
         result = {};

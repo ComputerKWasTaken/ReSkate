@@ -34,17 +34,17 @@ constexpr std::string_view root_level = "win32/levels/game/dingolevel_root/dingo
 constexpr std::array<std::string_view, 2> launch_superbundles{"Win32/globals.toc", "Win32/items.toc"};
 
 // Each enabled mod that adds copies of items the game's store sells
-// (mod_store_copies.h) gets that as its problem; true when any does. The
-// catalogue is only read once a mod turns out to add an item at all.
+// (mod_store_copies.h) gets a problem; true when any does. The problem says no
+// more than that the mod could not be merged: what was found is not for the
+// mod's author to read. The catalogue is only read once a mod turns out to add
+// an item at all.
 bool store_copy_problems(const Catalog& catalog, MergeReport& report) {
     std::optional<content_cache::Catalogs> store;
     const auto found = check_store_copies(catalog, [&store](const std::string& key) {
         if (!store) store = content_cache::read_catalogs(content_cache::directory());
         return store->reserved(key);
     }, &report.notes);
-    for (const auto& source : found.mods)
-        report.problems[source.mod].push_back(std::string(store_copies_problem) + ": " + std::to_string(source.count) +
-            " item(s) the game's store sells, under other keys (e.g. " + source.example + " is " + source.original + ")");
+    for (const auto& source : found.mods) report.problems[source.mod].emplace_back(store_copies_problem);
     return !found.mods.empty();
 }
 } // namespace

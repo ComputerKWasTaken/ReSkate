@@ -3,9 +3,9 @@
 // ReSkate never hands out a store item, and tells one by its key. The mods that got round that
 // (2026-10-05) all did it the same way: each store item again under a key of its own, which is
 // in no catalogue and so was handed out like any mod's item. The check tells a copy by what it
-// is made of, and the merge leaves a mod that adds one out whole. What it must not do is take
-// a mod's own item for one: mods fit textures of their own on the game's meshes, a store
-// item's included, and that is theirs.
+// is made of, and the merge leaves a mod that adds one out whole, saying only that it could
+// not be merged. What it must not do is take a mod's own item for one: mods fit textures of
+// their own on the game's meshes, a store item's included, and that is theirs.
 //
 // Arguments: [<Skate folder> [<folder of mods>...]]. With the game and its content cache (which
 // says what the store sells) the check is run on mods made here from the game's own items; the
@@ -79,13 +79,6 @@ void rules() {
     check(copies({}, {}, "f").empty(), "data a free item has as well is free");
     check(copies({}, {}, "").empty(), "data with nothing in it says nothing");
     check(copies({}, {}).empty(), "an item of the mod's own is no copy");
-}
-
-// How a mod left out for it is told from one that could not be merged.
-void problems() {
-    check(copies_store_items({std::string(store_copies_problem) + ": 3 item(s) the game's store sells"}), "the problem is known by how it begins");
-    check(!copies_store_items({"levels/game/x: damaged", std::string(store_copies_problem)}), "and only when it leads");
-    check(!copies_store_items({}), "no problem is not that problem");
 }
 
 fb::Guid guid(std::uint8_t seed) {
@@ -288,7 +281,8 @@ void made_mods(const Game& game, const CasStore& store, const StoreItem& sold) {
     check(check_store_copies(catalog, [](const std::string&) { return false; }).items.empty(), "nothing is a copy when the store sells nothing");
 
     // The merge builds nothing while such a mod is among them, and says whose problem it is, so
-    // the caller leaves that mod out; without it the others merge as they always did.
+    // the caller leaves that mod out; without it the others merge as they always did. The
+    // problem is one line that tells the mod's author nothing: no item, no count, no reason.
     const auto told = [](const MergeReport& report) {
         std::string text = "\n  issue: '" + report.issue + "'";
         for (const auto& [mod, list] : report.problems)
@@ -297,8 +291,14 @@ void made_mods(const Game& game, const CasStore& store, const StoreItem& sold) {
     };
     const auto refused = merge_mods(catalog);
     check(refused.issue.empty() && !refused.built, "nothing is built with a mod that copies store items among them" + told(refused));
-    check(refused.problems.size() == 1 && refused.problems.contains("copies") && copies_store_items(refused.problems.at("copies")),
-          "and the problem is that mod's alone" + told(refused));
+    check(refused.problems.size() == 1 && refused.problems.contains("copies") &&
+          refused.problems.at("copies") == std::vector<std::string>{std::string(store_copies_problem)},
+          "and the problem is that mod's alone, and only the one line" + told(refused));
+    const auto lower_case = [](std::string text) { return lower(text); };
+    for (const auto* word : {"store", "copy", "copies", "item", "own_"})
+        check(lower_case(std::string(store_copies_problem)).find(word) == std::string::npos &&
+              lower_case(std::string(store_copies_check)).find(word) == std::string::npos,
+              std::string("what the mod is told does not say '") + word + "'");
     check(!fs::exists(catalog.root / generated_folder / L"layout.toc", error), "no patch was written for them");
     std::erase_if(catalog.mods, [](const Mod& mod) { return mod.name == "copies"; });
     const auto merged = merge_mods(catalog);
@@ -337,7 +337,6 @@ void installed_mods(const fs::path& game, const fs::path& folder, const StoreIte
 
 int main(int argc, char** argv) try {
     rules();
-    problems();
     {
         // No mods: nothing to read, the game's own files included.
         std::vector<std::string> notes;
