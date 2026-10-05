@@ -46,6 +46,10 @@ int main() {
     launch.pending = true;
     check(!launch.consume(true, true) && !launch.pending, "guests never randomize host-controlled parks");
     check(!launch.consume(true, false), "leaving a host does not defer startup randomization");
+    launch.pending = true;
+    check(!launch.consume(false, true) && !launch.pending,
+          "joining a host cancels startup randomization before park content is ready");
+    check(!launch.consume(true, false), "leaving an unready host session cannot trigger a deferred roll");
     if (failures) return 1;
     std::cout << "park randomization: ok\n";
     return 0;

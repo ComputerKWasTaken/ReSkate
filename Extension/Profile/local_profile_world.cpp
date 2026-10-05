@@ -279,6 +279,9 @@ void set_lobby_park_mode(bool active, bool guest) {
     std::lock_guard lock(s.native_mutex);
     if (r.lobby_active == active && r.model.controlled_by_host == (active && guest)) return;
     if (!s.active.load(std::memory_order_acquire) || !r.active.load(std::memory_order_acquire)) return;
+    // Joining a host cancels this launch's roll even before a park controller
+    // can tick. Leaving the lobby must restore saved choices without rerolling.
+    if (active && guest) r.launch_randomization.pending = false;
     auto choices = r.model.choices;
     if (!active) choices = profile::park_choices(*s.store->shared_snapshot());
     else if (!guest) {

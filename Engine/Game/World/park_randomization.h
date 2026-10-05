@@ -30,8 +30,9 @@ struct ParkLaunchRandomization {
     // Waiting for content does not consume the launch. Joining a host does:
     // leaving that session or reconstructing the controller must not reroll.
     bool consume(bool ready, bool controlled_by_host) {
+        if (controlled_by_host) { pending = false; return false; }
         if (!ready || !std::exchange(pending, false)) return false;
-        return !controlled_by_host;
+        return true;
     }
 };
 }
