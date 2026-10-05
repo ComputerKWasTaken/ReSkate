@@ -5,6 +5,7 @@
 #include "Extension/Customization/local_customization_runtime.h"
 #include "Extension/Customization/local_player_card_runtime.h"
 #include "Extension/Music/local_music_ui.h"
+#include "Extension/Music/local_music_shelf.h"
 #include "Extension/News/local_news_runtime.h"
 #include "Extension/Objects/local_buildkit_labels.h"
 #include "Extension/Objects/local_buildkit_limits.h"
@@ -325,6 +326,7 @@ void update_local_customization() noexcept {
     try { update_object_categories(); }
     catch (...) { dingosdk::logging::event(dingosdk::logging::Channel::profile, "{\"event\":\"local_object_categories_failed\",\"operation\":\"update\"}"); }
     update_music_catalog();
+    update_music_shelf();
     try {
         if (cosmetic_runtime().update_thread == GetCurrentThreadId() && !cosmetic_runtime().items.empty())
             update_player_card();

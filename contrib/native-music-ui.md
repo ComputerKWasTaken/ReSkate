@@ -5,7 +5,8 @@ existing Music Playlist Manager. It is a worked example of changing native UI
 through its data models, while reusing the game's layout, playlist tiles and
 selection behavior.
 
-The implementation lives in [local_music_ui.cpp](../Extension/Music/local_music_ui.cpp).
+The shelf hook and model management live in [local_music_shelf.cpp](../Extension/Music/local_music_shelf.cpp).
+The playlist and song UI publication remains in [local_music_ui.cpp](../Extension/Music/local_music_ui.cpp).
 These are C++ runtime changes. A music mod can supply playlists through the
 existing music-mod pipeline; adding a new native shelf requires runtime code
 such as this hook. There is no general declarative UI-mod API established here.
@@ -171,7 +172,7 @@ The shelf hook calls the original constructor first. On its return, it recognize
 the exact music list and inserts the new entry before the native caller continues
 to bind widgets. It returns the original handle unchanged. Installation checks
 an exact 32-byte executable fingerprint; a mismatch leaves this hook uninstalled.
-See [local_music_ui.h](../Extension/Music/local_music_ui.h) for the contract and
+See [local_music_shelf.h](../Extension/Music/local_music_shelf.h) for the contract and
 [local_profile_runtime.cpp](../Extension/Profile/local_profile_runtime.cpp) for
 installation. That profile-runtime change only installs the music hook; it does
 not change cosmetic ownership or progression.
