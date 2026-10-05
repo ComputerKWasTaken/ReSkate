@@ -472,13 +472,7 @@ int run(const launcher_app::Session& session, const std::vector<std::wstring>& a
             // A pad pressed while another window has the focus is not meant for us;
             // it reads as let go, so nothing stays held while we are in the background.
             const bool foreground = GetForegroundWindow() == window;
-            if (const auto pointer = pad_feed.update(ImGui::GetIO(), foreground ? read_pad() : PadState{}, g_scale)) {
-                // The system cursor follows the pad's pointer, so the two agree when the
-                // mouse or the touch screen is used next. ImGui draws the pointer itself,
-                // so a cursor the system will not move (Proton, gamescope) costs nothing.
-                POINT point{static_cast<LONG>(pointer->x), static_cast<LONG>(pointer->y)};
-                if (ClientToScreen(window, &point)) SetCursorPos(point.x, point.y);
-            }
+            pad_feed.update(ImGui::GetIO(), foreground ? read_pad() : PadState{}, g_scale);
             ImGui::NewFrame();
             frame(launcher, fonts, window, ui, mods_panel);
             ImGui::Render();

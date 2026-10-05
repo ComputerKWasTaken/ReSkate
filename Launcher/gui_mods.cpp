@@ -571,7 +571,7 @@ void installed_page(Launcher& launcher, const Fonts& fonts, ModsPanel& panel, co
     // ------------------------------------------------ the list, and under it how its order works
     const float hint = ImGui::GetTextLineHeightWithSpacing();
     const float body = std::max(S(120), height - (ImGui::GetCursorPosY() - top) - hint);
-    ImGui::BeginChild("##mod_list", ImVec2(0, body), ImGuiChildFlags_Borders);
+    ImGui::BeginChild("##mod_list", ImVec2(0, body), ImGuiChildFlags_Borders | ImGuiChildFlags_NavFlattened);
     const auto note = [](const char* first, const char* second = nullptr) {
         ImGui::Spacing();
         ImGui::Indent(S(14));
@@ -670,7 +670,8 @@ void mod_overview(const Fonts& fonts, ModsPanel& panel, const thunderstore::Inst
     ImGui::Spacing();
 
     ImGui::BeginChild("##mod_overview_body",
-        ImVec2(0, std::max(S(80), extent.y - ImGui::GetCursorPosY() - S(24) - ImGui::GetFrameHeight())));
+        ImVec2(0, std::max(S(80), extent.y - ImGui::GetCursorPosY() - S(24) - ImGui::GetFrameHeight())),
+        ImGuiChildFlags_NavFlattened);
     ImGui::PushTextWrapPos(0);
     if (!mod.outdated.empty())
         ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(color::danger),
@@ -850,7 +851,7 @@ void mods_broken_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, Ui&
 
     const float footer = ImGui::GetFrameHeight() + ImGui::GetTextLineHeight() + S(56);
     ImGui::BeginChild("##broken_list", ImVec2(0, frame.y - ImGui::GetCursorPosY() - footer),
-        ImGuiChildFlags_Borders);
+        ImGuiChildFlags_Borders | ImGuiChildFlags_NavFlattened);
     for (const auto& problem : problems) {
         ImGui::PushFont(fonts.bold);
         ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(color::danger));
@@ -934,7 +935,7 @@ void mods_outdated_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, U
 
     const float footer = ImGui::GetFrameHeight() + S(44);
     ImGui::BeginChild("##outdated_list", ImVec2(0, frame.y - ImGui::GetCursorPosY() - footer),
-        ImGuiChildFlags_Borders);
+        ImGuiChildFlags_Borders | ImGuiChildFlags_NavFlattened);
     for (const auto* package : pending) {
         const auto found = installed.find(thunderstore::folder_for(package->full_name));
         ImGui::PushFont(fonts.bold);
@@ -1013,12 +1014,13 @@ void mods_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, Ui& ui, Mo
 
     const float rail_top = top + title_size * 2 + S(16);
     ImGui::SetCursorPos(ImVec2(rail_x, rail_top));
-    ImGui::BeginChild("##rail", ImVec2(rail_width, bottom - rail_top));
+    // Flattened, so a controller's D-pad crosses from the rail into the list and back.
+    ImGui::BeginChild("##rail", ImVec2(rail_width, bottom - rail_top), ImGuiChildFlags_NavFlattened);
     const bool leave = rail(fonts, panel, window, rail_width, pending, installing);
     ImGui::EndChild();
 
     ImGui::SetCursorPos(ImVec2(content_x, top));
-    ImGui::BeginChild("##content", ImVec2(frame.x - content_x - S(28), bottom - top));
+    ImGui::BeginChild("##content", ImVec2(frame.x - content_x - S(28), bottom - top), ImGuiChildFlags_NavFlattened);
     // With nothing to say, the list runs all the way down to BACK's bottom
     // edge; a message takes two lines off it until it is gone.
     const float status = panel.message.empty() ? S(4) : ImGui::GetTextLineHeight() * 2 + S(12);

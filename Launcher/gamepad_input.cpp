@@ -29,8 +29,7 @@ constexpr float left_dead_zone = 7849.0f / 32767.0f;
 constexpr float right_dead_zone = 0.2f;
 // Pointer speed at full tilt, in design pixels a second.
 constexpr float pointer_speed = 1400.0f;
-// A mouse move this close to the pad's pointer is the echo of moving the
-// system cursor there; one further away is the mouse or a finger.
+// A mouse move this close to the last one is the same place reported again.
 constexpr float pointer_slack = 2.0f;
 
 float axis(std::int16_t value) { return std::clamp(static_cast<float>(value) / 32767.0f, -1.0f, 1.0f); }
@@ -52,13 +51,13 @@ bool imgui_cancels() {
     return top && !(top->Flags & ImGuiWindowFlags_Modal);
 }
 
-bool moved_away(ImVec2 position, ImVec2 pointer) {
-    return std::abs(position.x - pointer.x) > pointer_slack || std::abs(position.y - pointer.y) > pointer_slack;
+bool moved_away(ImVec2 position, ImVec2 before) {
+    return std::abs(position.x - before.x) > pointer_slack || std::abs(position.y - before.y) > pointer_slack;
 }
 
 } // namespace
 
-std::optional<ImVec2> PadFeed::update(ImGuiIO& io, const PadState& input, float scale) {
+void PadFeed::update(ImGuiIO& io, const PadState& input, float scale) {
     // A pad that went away lets go of everything it held.
     const PadState pad = input.connected ? input : PadState{};
     const auto changed = static_cast<std::uint16_t>(pad.buttons ^ buttons_);
@@ -90,12 +89,13 @@ std::optional<ImVec2> PadFeed::update(ImGuiIO& io, const PadState& input, float 
     if ((pressed & focus_bits) || std::abs(left_x) > left_dead_zone || std::abs(left_y) > left_dead_zone)
         pointing_ = false;
 
-    bool warp = false;
     const float x = axis(pad.right_x), y = -axis(pad.right_y);   // screen Y grows downward
     const float tilt = std::min(1.0f, std::sqrt(x * x + y * y));
+    // The first R3 only shows the pointer: a stray click must not press
+    // whatever the mouse last rested on.
+    const bool click = pointing_ && (pressed & right_thumb);
     if (!pointing_ && (tilt > right_dead_zone || (pressed & right_thumb))) {
         pointing_ = true;
-        warp = true;
         // From wherever the mouse left it, which may be outside the window.
         pointer_ = ImGui::IsMousePosValid(&io.MousePos) ? io.MousePos
                                                         : ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f);
@@ -107,31 +107,28 @@ std::optional<ImVec2> PadFeed::update(ImGuiIO& io, const PadState& input, float 
         const float step = speed * speed * pointer_speed * scale * io.DeltaTime / tilt;
         pointer_.x += x * step;
         pointer_.y += y * step;
-        warp = true;
     }
     if (pointing_) {
         pointer_.x = std::clamp(pointer_.x, 0.0f, std::max(0.0f, io.DisplaySize.x - 1));
         pointer_.y = std::clamp(pointer_.y, 0.0f, std::max(0.0f, io.DisplaySize.y - 1));
-        // Every frame, after the backend's own: it may report a system cursor
-        // that Proton or gamescope did not move along with ours.
+        // Every frame, after the backend's own report of the system cursor,
+        // which stays where the mouse left it.
         io.AddMouseSourceEvent(ImGuiMouseSource_Mouse);
         io.AddMousePosEvent(pointer_.x, pointer_.y);
     }
-    // The release is sent even when the mouse took the pointer meanwhile: the
-    // press was ours.
-    if (changed & right_thumb) {
+    if (click || (clicking_ && (changed & right_thumb))) {
+        clicking_ = click;
         io.AddMouseSourceEvent(ImGuiMouseSource_Mouse);
-        io.AddMouseButtonEvent(ImGuiMouseButton_Left, (pad.buttons & right_thumb) != 0);
+        io.AddMouseButtonEvent(ImGuiMouseButton_Left, click);
     }
     io.MouseDrawCursor = pointing_;
-    if (warp) return pointer_;
-    return std::nullopt;
 }
 
 void PadFeed::mouse_moved(ImVec2 position) {
-    // Our own cursor move comes back as a mouse move too; only one that lands
-    // somewhere else is the mouse or a finger.
-    if (pointing_ && moved_away(position, pointer_)) pointing_ = false;
+    // Windows repeats a mouse move where the mouse already was when a window
+    // changes under it; only a move to a new place is the mouse or a finger.
+    if (pointing_ && moved_away(position, mouse_)) pointing_ = false;
+    mouse_ = position;
 }
 
 } // namespace dingosdk::launcher_gui

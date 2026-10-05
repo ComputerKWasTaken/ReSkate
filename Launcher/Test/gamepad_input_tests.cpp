@@ -31,12 +31,11 @@ struct Seen {
 
 // One launcher frame: the pad goes in before NewFrame, as gui.cpp does it.
 // Two buttons stacked at the top left, and a menu popup opened on request.
-Seen frame(PadFeed& feed, const PadState& pad, bool open_menu = false, std::optional<ImVec2>* warp = nullptr) {
+Seen frame(PadFeed& feed, const PadState& pad, bool open_menu = false, bool panels = false) {
     auto& io = ImGui::GetIO();
     io.DisplaySize = ImVec2(800, 600);
     io.DeltaTime = 1.0f / 60.0f;
-    const auto moved = feed.update(io, pad, 1.0f);
-    if (warp) *warp = moved;
+    feed.update(io, pad, 1.0f);
     ImGui::NewFrame();
     Seen seen;
     ImGui::SetNextWindowPos(ImVec2(0, 0));
@@ -46,6 +45,17 @@ Seen frame(PadFeed& feed, const PadState& pad, bool open_menu = false, std::opti
     if (ImGui::InvisibleButton("first", ImVec2(200, 50), ImGuiButtonFlags_EnableNav)) seen.pressed = "first";
     ImGui::SetCursorScreenPos(ImVec2(100, 200));
     if (ImGui::InvisibleButton("second", ImVec2(200, 50), ImGuiButtonFlags_EnableNav)) seen.pressed = "second";
+    if (panels) {
+        // A page's rail and content, side by side, as Settings and Mods lay them out.
+        ImGui::SetCursorScreenPos(ImVec2(400, 200));
+        ImGui::BeginChild("##rail", ImVec2(150, 200), ImGuiChildFlags_NavFlattened);
+        if (ImGui::Button("tab", ImVec2(120, 40))) seen.pressed = "tab";
+        ImGui::EndChild();
+        ImGui::SetCursorScreenPos(ImVec2(580, 200));
+        ImGui::BeginChild("##content", ImVec2(200, 200), ImGuiChildFlags_NavFlattened);
+        if (ImGui::Button("option", ImVec2(120, 40))) seen.pressed = "option";
+        ImGui::EndChild();
+    }
     if (open_menu) ImGui::OpenPopup("##menu");
     if (ImGui::BeginPopup("##menu")) {
         seen.menu_open = true;
@@ -145,38 +155,55 @@ int main() {
         check(ImGui::IsKeyDown(ImGuiKey_Escape), "An idle pad does not let go of the keyboard's Escape");
     }
 
+    {
+        fresh();
+        PadFeed feed;
+        constexpr std::uint16_t dpad_right = 0x0008;
+        for (int i = 0; i < 2; ++i) frame(feed, pad(), false, true);
+        const auto tap = [&](std::uint16_t button) { frame(feed, pad(button), false, true); frame(feed, pad(), false, true); };
+        tap(dpad_down);   // onto "first"
+        tap(dpad_down);   // "second", level with the panels
+        tap(dpad_right);  // the rail
+        tap(dpad_right);  // the content
+        std::string pressed = frame(feed, pad(button_a), false, true).pressed;
+        const auto released = frame(feed, pad(), false, true).pressed;
+        check((pressed.empty() ? released : pressed) == "option",
+              "The D-pad crosses from a page's rail into its content");
+    }
+
     // ------------------------------------------------ trackpad pointer
     {
         fresh();
         PadFeed feed;
-        ImGui::GetIO().AddMousePosEvent(400, 300);
+        auto& io = ImGui::GetIO();
+        io.AddMousePosEvent(400, 300);
+        feed.mouse_moved(ImVec2(400, 300));
         frame(feed, pad());
-        std::optional<ImVec2> warp;
-        frame(feed, pad(0, 3000, 0), false, &warp);
-        check(!warp && !feed.pointing(), "A thumb resting near the middle does not move the pointer");
+        frame(feed, pad(0, 3000, 0));
+        check(!feed.pointing() && io.MousePos.x == 400, "A thumb resting near the middle does not move the pointer");
 
-        frame(feed, pad(0, 16000, 0), false, &warp);
-        check(feed.pointing() && ImGui::GetIO().MouseDrawCursor, "Tilting takes the pointer and draws it");
-        check(warp && warp->x > 400 && warp->y == 300, "Tilting right moves the pointer right, from the mouse's place");
-        for (int i = 0; i < 120; ++i) frame(feed, pad(0, 32767, 32767), false, &warp);
-        check(warp && warp->x == 799 && warp->y == 0, "The pointer stays inside the window");
+        frame(feed, pad(0, 16000, 0));
         frame(feed, pad());
-        check(ImGui::GetIO().MousePos.x == 799 && ImGui::GetIO().MousePos.y == 0, "ImGui's mouse is where the pad left it");
+        check(feed.pointing() && io.MouseDrawCursor, "Tilting takes the pointer and draws it");
+        check(io.MousePos.x > 400 && io.MousePos.y == 300, "Tilting right moves the pointer right, from the mouse's place");
+        for (int i = 0; i < 120; ++i) frame(feed, pad(0, 32767, 32767));
+        frame(feed, pad());
+        check(io.MousePos.x == 799 && io.MousePos.y == 0, "The pointer stays inside the window");
 
-        // The system cursor reporting a stale place (Proton, gamescope) does not take the pointer back.
-        ImGui::GetIO().AddMousePosEvent(10, 10);
-        frame(feed, pad(), false, &warp);
+        // The system cursor stays where the mouse left it, and is reported every frame.
+        io.AddMousePosEvent(400, 300);
         frame(feed, pad());
-        check(!warp && ImGui::GetIO().MousePos.x == 799, "Without tilt the pointer stays put");
+        frame(feed, pad());
+        check(io.MousePos.x == 799, "The system cursor's old place does not take the pointer back");
+        feed.mouse_moved(ImVec2(400, 300));   // the same place, repeated by Windows
+        check(feed.pointing(), "A mouse move repeated in the same place keeps the pointer");
 
-        feed.mouse_moved(ImVec2(799, 0));   // the echo of our own cursor move
-        check(feed.pointing(), "The echo of our own cursor move keeps the pointer");
-        feed.mouse_moved(ImVec2(50, 60));   // the mouse, or a finger on the screen
-        ImGui::GetIO().AddMousePosEvent(50, 60);
+        feed.mouse_moved(ImVec2(50, 60));     // the mouse, or a finger on the screen
+        io.AddMousePosEvent(50, 60);
         frame(feed, pad());
         frame(feed, pad());
-        check(!feed.pointing() && !ImGui::GetIO().MouseDrawCursor, "The mouse takes the pointer back");
-        check(ImGui::GetIO().MousePos.x == 50, "The mouse's place wins once it moved");
+        check(!feed.pointing() && !io.MouseDrawCursor, "The mouse takes the pointer back");
+        check(io.MousePos.x == 50, "The mouse's place wins once it moved");
     }
     {
         fresh();
@@ -185,14 +212,15 @@ int main() {
         frame(feed, pad());
         frame(feed, pad());
         std::string pressed = frame(feed, pad(right_thumb)).pressed;
-        check(ImGui::GetIO().MouseDown[0], "The trackpad's click (R3) holds the left button");
-        const auto released = frame(feed, pad()).pressed;
-        if (pressed.empty()) pressed = released;
+        pressed += frame(feed, pad()).pressed;
+        check(feed.pointing() && pressed.empty() && !ImGui::GetIO().MouseDown[0],
+              "The first trackpad click (R3) only shows the pointer");
+        pressed = frame(feed, pad(right_thumb)).pressed;
+        check(ImGui::GetIO().MouseDown[0], "The next click holds the left button");
+        pressed += frame(feed, pad()).pressed;
         check(pressed == "second", "The trackpad's click presses what the pointer is over");
         check(!ImGui::GetIO().MouseDown[0], "Letting go of R3 lets go of the left button");
 
-        frame(feed, pad(0, 20000, 0));
-        check(feed.pointing(), "The pointer is the pad's");
         press(feed, dpad_down);
         check(!feed.pointing() && ImGui::GetIO().NavVisible, "The D-pad hands the screen back to the focus");
     }

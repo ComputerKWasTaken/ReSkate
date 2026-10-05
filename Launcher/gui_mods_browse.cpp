@@ -474,7 +474,7 @@ void browse_page(Launcher& launcher, const Fonts& fonts, ModsPanel& panel, float
     const auto packages = visible_packages(store, installed);
 
     // ------------------------------------------------ the list
-    ImGui::BeginChild("##store_list", ImVec2(0, body), ImGuiChildFlags_Borders);
+    ImGui::BeginChild("##store_list", ImVec2(0, body), ImGuiChildFlags_Borders | ImGuiChildFlags_NavFlattened);
     const auto note = [](const char* text) {
         ImGui::Spacing();
         ImGui::Indent(S(14));
@@ -653,7 +653,8 @@ void package_overview(const Fonts& fonts, ModsPanel& panel, ImVec2 size, bool in
     ImGui::Spacing();
 
     ImGui::BeginChild("##overview_body",
-        ImVec2(0, std::max(S(80), extent.y - ImGui::GetCursorPosY() - S(24) - ImGui::GetFrameHeight())));
+        ImVec2(0, std::max(S(80), extent.y - ImGui::GetCursorPosY() - S(24) - ImGui::GetFrameHeight())),
+        ImGuiChildFlags_NavFlattened);
     ImGui::PushTextWrapPos(0);
     if (package.deprecated)
         ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(color::warning),

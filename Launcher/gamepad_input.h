@@ -3,7 +3,6 @@
 #include <imgui.h>
 
 #include <cstdint>
-#include <optional>
 
 // Controller input for the launcher window. Kept free of Windows headers so
 // the mapping can be tested anywhere; gui_gamepad.cpp reads the pads.
@@ -29,15 +28,14 @@ struct PadState {
 class PadFeed {
 public:
     // Call once a frame after the backends' NewFrame and before
-    // ImGui::NewFrame(), which takes the events in. Returns where the OS
-    // cursor should move (client area pixels) when the pad moved the pointer.
-    std::optional<ImVec2> update(ImGuiIO& io, const PadState& pad, float scale);
+    // ImGui::NewFrame(), which takes the events in.
+    void update(ImGuiIO& io, const PadState& pad, float scale);
     // A mouse move or a touch the window received (WM_MOUSEMOVE, client area
-    // pixels). One that is not the echo of our own cursor move takes the
-    // pointer back from the pad.
+    // pixels). A move to a new place takes the pointer back from the pad.
     void mouse_moved(ImVec2 position);
-    // The right stick owns the pointer; ImGui draws it, since the Steam
-    // Deck's Game Mode may not show the system cursor.
+    // The right stick owns the pointer. ImGui draws it and the system cursor
+    // stays put: under Proton a moved system cursor comes back late as a
+    // mouse move, which would look like the mouse taking over.
     bool pointing() const { return pointing_; }
 
 private:
@@ -45,7 +43,9 @@ private:
     ImGuiKey back_key_{ImGuiKey_Escape};
     bool connected_{};
     bool pointing_{};
+    bool clicking_{};   // R3 holds the left button
     ImVec2 pointer_{};
+    ImVec2 mouse_{-1, -1};   // where the last mouse move was
 };
 
 } // namespace dingosdk::launcher_gui
