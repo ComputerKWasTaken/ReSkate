@@ -194,6 +194,14 @@ std::string send_chat(Session &s, std::string_view typed) {
     message.text = text;
     broadcast(s, message, true, false, now);
     const auto local = s.transport.status().local_id;
+    // The host passes a guest's line on, and could pass on anything under anyone's name. So a
+    // guest whose line shows a badge of the backend's also sends it straight to every player
+    // Steam connects them to: the copy is not shown, it is what lets that player know the
+    // host's one is ours (chat proofs, session_receive.cpp). Older builds ignore it.
+    if (s.mode == Mode::join && own_tag_shown() && identity_mark(local))
+        for (const auto &peer : active_peers(s))
+            if (peer.handshaken && peer.direct_ready && peer.member.id != s.host_id)
+                send_packet(s, peer.member.id, message, true, false);
     add_chat(s, local, s.transport.name(local), std::move(text), true);
     return {};
 }
@@ -596,9 +604,13 @@ void send_local(Session &s, const NativeFrame &local, std::uint64_t now, std::ui
     if (now - s.last_cosmetic_capture >= 500000) {
         s.last_cosmetic_capture = now;
         auto appearance = capture_cosmetics(s.base, local, s.cosmetic_capture_status);
-        // The player's choice to go without their marks travels with their outfit, so a change
-        // is sent like one and reaches players who join later.
-        if (appearance) appearance->unmarked = !own_marks_shown();
+        // The player's choices to go without their tag or their animated items travel with their
+        // outfit, so a change is sent like one and reaches players who join later.
+        if (appearance) {
+            appearance->hide_tag = !own_tag_shown();
+            appearance->hide_items = !own_items_shown();
+            appearance->marks = developer_hoodie_detail::own_styles.load();
+        }
         if (appearance && (!s.sent_appearance || *appearance != *s.sent_appearance)) {
             auto p = packet(s, PacketKind::cosmetics, now);
             p.appearance = *appearance;

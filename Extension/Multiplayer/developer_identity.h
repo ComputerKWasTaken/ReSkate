@@ -33,11 +33,14 @@ inline std::optional<IdentityList> identity_mark(std::uint64_t id) noexcept {
         if (identity_listed(id, list)) return list;
     return std::nullopt;
 }
-// The local player's own choice to go without their marks (the menu's Special page, which
-// only a listed player gets). Their appearance tells everyone else (Appearance::unmarked).
-inline std::atomic<bool> own_marks{true};
-inline bool own_marks_shown() noexcept { return own_marks.load(std::memory_order_relaxed); }
-inline void show_own_marks(bool shown) noexcept { own_marks.store(shown, std::memory_order_relaxed); }
+// The local player's own choices to go without their tag, and without their animated items
+// (the menu's Special page, which only a listed player gets). Their appearance tells everyone
+// else (Appearance::hide_tag, Appearance::hide_items).
+inline std::atomic<bool> own_tag{true}, own_items{true};
+inline bool own_tag_shown() noexcept { return own_tag.load(std::memory_order_relaxed); }
+inline void show_own_tag(bool shown) noexcept { own_tag.store(shown, std::memory_order_relaxed); }
+inline bool own_items_shown() noexcept { return own_items.load(std::memory_order_relaxed); }
+inline void show_own_items(bool shown) noexcept { own_items.store(shown, std::memory_order_relaxed); }
 // A global ban is enforced by whoever a player would play with: a host and a dedicated server
 // turn them away, and a guest leaves a lobby they host, which their own game does not start
 // either (session_receive.cpp, Server/server_host.cpp). A server can opt out ("global_bans"),

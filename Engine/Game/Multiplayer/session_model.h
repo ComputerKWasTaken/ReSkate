@@ -11,6 +11,7 @@
 #include <vector>
 
 namespace dingosdk {
+constexpr unsigned max_map_rotation = 1440; // minutes a server's rotation keeps one map, at most
 struct MultiplayerLobby {
     std::uint64_t id{}, owner{};
     std::string name, map, code;
@@ -114,9 +115,23 @@ struct MultiplayerModel {
     // Local: bad words in chat names and messages show as **** (on by default).
     bool chat_filter{true};
     // Local: the tag the ReSkate backend gives this player ("Dev", "Creator" or "Homie"; empty
-    // for most players), and whether they show it and its animated items, to everyone.
+    // for most players) and its role colour, and whether they show it, and the animated items
+    // that come with it, to everyone.
     std::string identity_tag;
-    bool identity_marks{true};
+    std::uint32_t identity_tag_colour{};
+    bool identity_tag_shown{true}, identity_items_shown{true};
+    // Local: how each of this player's marked cosmetics is coloured, for the Special page: what
+    // they wear in each slot ("Top", "Shoes", ...), then the parts of their board. mode: 0 what
+    // their list gives (`identity_animation`: "RAINBOW", "RED" or "GOLD"), 1 off, 2 a gradient
+    // between the two colours they picked, 3 the first of them alone. speed: 0 normal, 1 slow,
+    // 2 fast.
+    struct IdentityStyle {
+        std::string name;
+        int mode{}, speed{};
+        std::array<float, 3> from{}, to{};
+    };
+    std::vector<IdentityStyle> identity_styles;
+    std::string identity_animation;
     float voice_range = default_voice_range;  // how far the host (or server) forwards proximity voice
     // In a dedicated server's session: the server is the host but not a player.
     // Admins it lists may change its settings, and its map through Levels.
@@ -126,6 +141,9 @@ struct MultiplayerModel {
     unsigned server_ban_total{};
     // For its admins: the levels (assets) the dedicated server can switch to.
     std::vector<std::string> server_maps;
+    std::vector<std::string> server_map_pool; // in rotation order; empty: every map
+    unsigned server_map_rotation{};           // minutes per map (0: off)
+    bool server_map_votes{};                  // players may vote for a map
     MultiplayerHostPreferences saved_host;
     bool force_world_layers{};
     std::uint64_t host_id{};

@@ -331,14 +331,30 @@ void cosmetics_codec() {
                     {board_recipe_key, 1, {0x3f800000}, {{13, "Own_Deck", {7}}}}};
     const auto bytes = encode(p);
     const auto decoded = decode(bytes);
-    check(decoded && decoded->appearance == p.appearance && !decoded->appearance.unmarked,
+    check(decoded && decoded->appearance == p.appearance && !decoded->appearance.hide_tag && !decoded->appearance.hide_items,
           "Cosmetic fields or opaque parameter bits were lost");
-    // A player's choice to go without their backend marks travels with their outfit.
-    auto unmarked = p;
-    unmarked.appearance.unmarked = true;
-    const auto told = decode(encode(unmarked));
-    check(told && told->appearance.unmarked && told->appearance == unmarked.appearance && !(told->appearance == p.appearance),
-          "A player's choice to hide their marks was lost");
+    // A player's choices to go without their backend tag, or its animated items, travel with
+    // their outfit, each on its own.
+    for (const auto &[tag, items] : {std::pair{true, false}, std::pair{false, true}, std::pair{true, true}}) {
+        auto hidden = p;
+        hidden.appearance.hide_tag = tag, hidden.appearance.hide_items = items;
+        const auto told = decode(encode(hidden));
+        check(told && told->appearance.hide_tag == tag && told->appearance.hide_items == items &&
+                  told->appearance == hidden.appearance && !(told->appearance == p.appearance),
+              "A player's choice to hide their tag or their items was lost");
+    }
+    // So does how they have each marked cosmetic animate.
+    auto styled = p;
+    styled.appearance.marks[0] = {MarkMode::gradient, {1, 2, 3}, {250, 251, 252}, 2};
+    styled.appearance.marks[4] = {MarkMode::off, {}, {}, 1};
+    styled.appearance.marks.back() = {MarkMode::solid, {9, 8, 7}, {}, 0};
+    const auto kept = decode(encode(styled));
+    check(kept && kept->appearance == styled.appearance && kept->appearance.marks[0].to[2] == 252 &&
+              kept->appearance.marks.back().mode == MarkMode::solid && kept->appearance.marks.back().from[0] == 9 &&
+              kept->appearance.marks[1] == MarkStyle{} && !(kept->appearance == p.appearance),
+          "A player's cosmetic styles were lost");
+    check(!valid_mark_style({static_cast<MarkMode>(4), {}, {}, 0}) && !valid_mark_style({MarkMode::standard, {}, {}, 3}),
+          "A cosmetic style no menu can make was accepted");
     for (std::size_t n = 0; n < bytes.size(); ++n)
         check(!decode(std::span(bytes).first(n)), "Truncated cosmetics accepted");
     auto corrupt = bytes;
@@ -858,6 +874,31 @@ void dedicated_server_codec() {
     maps.maps = {"Levels/Game/BAM_LevelRoot/BAM_LevelRoot", "Levels/Custom/bbcity/bbcity"};
     const auto map_list = decode_wire(encode_wire(maps));
     check(map_list && map_list->kind == PacketKind::maps && map_list->maps == maps.maps, "Server map list lost");
+    auto pooled = maps;
+    pooled.map_pool = {1, 0};
+    pooled.map_rotation = 20;
+    const auto pool_list = decode_wire(encode_wire(pooled));
+    check(pool_list && pool_list->map_pool == pooled.map_pool && pool_list->map_rotation == 20, "Server map pool or rotation lost");
+    Packet changed_map;
+    changed_map.kind = PacketKind::world_state; changed_map.session = 9; changed_map.epoch = 10; changed_map.source = server; changed_map.world = 2;
+    changed_map.destination = "Levels/Game/DingoLevel_Root/DingoLevel_Root|Levels/Game/dingolevel_reskate_momentumpark/x";
+    changed_map.map = map_hash(changed_map.destination);
+    changed_map.map_label = "Momentum Park";
+    const auto arrived = decode_wire(encode_wire(changed_map));
+    check(arrived && arrived->map_label == "Momentum Park" && arrived->destination == changed_map.destination,
+          "The map's name lost from a map change");
+    auto unnamed = changed_map;
+    unnamed.map_label.assign(max_member_name + 1, 'a');
+    check(reject(unnamed), "An overlong map name encoded");
+    auto stray = maps;
+    stray.map_pool = {2};
+    check(reject(stray), "A map pool entry past the map list encoded");
+    auto twice = maps;
+    twice.map_pool = {0, 0};
+    check(reject(twice), "A map listed twice in the pool encoded");
+    auto endless = maps;
+    endless.map_rotation = dingosdk::max_map_rotation + 1;
+    check(reject(endless), "An overlong map rotation encoded");
     auto piped = maps;
     piped.maps[0] = "Levels/Game/DingoLevel_Root/DingoLevel_Root|Levels/Game/BAM_LevelRoot/BAM_LevelRoot";
     check(reject(piped), "A destination encoded as a server map");
