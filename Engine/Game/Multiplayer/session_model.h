@@ -69,7 +69,7 @@ struct MultiplayerChatLine {
     std::string name, text;
     bool local{};               // sent by this player
     // The sender's role, as their nametag shows it: its colour (IM_COL32 layout, 0 = none)
-    // and a tag shown in a box before the name ("Dev", "Admin", "Host", "Friend" or empty).
+    // and a tag shown in a box before the name ("Dev", "Creator", "Homie", "Admin", "Host", "Friend" or empty).
     std::uint32_t color{};
     std::string tag;
 };
@@ -113,6 +113,10 @@ struct MultiplayerModel {
     bool chat_visible{true};
     // Local: bad words in chat names and messages show as **** (on by default).
     bool chat_filter{true};
+    // Local: the tag the ReSkate backend gives this player ("Dev", "Creator" or "Homie"; empty
+    // for most players), and whether they show it and its animated items, to everyone.
+    std::string identity_tag;
+    bool identity_marks{true};
     float voice_range = default_voice_range;  // how far the host (or server) forwards proximity voice
     // In a dedicated server's session: the server is the host but not a player.
     // Admins it lists may change its settings, and its map through Levels.

@@ -10,6 +10,7 @@
 #include "Extension/UI/NativeMenu/native_menu.h"
 #include "Extension/Multiplayer/Hud/native_party.h"
 #include "Extension/Multiplayer/Hud/custom_nametags.h"
+#include "Extension/Multiplayer/developer_identity.h"
 #include "Extension/Multiplayer/Hud/follow_camera.h"
 #include "Engine/Game/UI/game_view.h"
 #include "Extension/Multiplayer/Steam/steam_friend_join.h"
@@ -991,6 +992,7 @@ void tick(std::uintptr_t client, std::uintptr_t update) {
             DINGO_PROFILE_ZONE("tick/multiplayer");
             dingosdk::multiplayer::tick(r.base,client,multiplayer_ready,r.multiplayer_map,load_multiplayer_map);
         }
+        dingosdk::multiplayer::refresh_identity_lists();
         dingosdk::tick_local_developer_hoodie(r.base, client, multiplayer_ready);
         dingosdk::tick_local_developer_board(r.base, client, multiplayer_ready);
         // The session spawns and places skaters and can teleport: check the camera again.

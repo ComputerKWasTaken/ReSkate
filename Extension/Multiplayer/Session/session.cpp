@@ -257,6 +257,7 @@ void publish_party(Session &s) {
         s.custom_nametags = profile_runtime::local_preference("CustomNametags").value_or(true);
         s.chat_visible = profile_runtime::local_preference("ChatVisible").value_or(true);
         s.chat_filter = profile_runtime::local_preference("ChatFilter").value_or(true);
+        show_own_marks(profile_runtime::local_preference("IdentityMarks").value_or(true));
         apply_nametags(s);
     }
     // The party's limit: parties players form hold up to eight (the game's Party panel rows),
@@ -425,7 +426,9 @@ void render(Session &s, std::uintptr_t client, const NativeFrame &local, std::ui
         }
     };
     // The developer hoodie and board mark an identity: only one Steam vouches for (steam_vouched).
-    const auto developer_id = [&](const Peer &p) { return steam_vouched(s, p) ? p.member.id : std::uint64_t{}; };
+    const auto developer_id = [&](const Peer &p) {
+        return steam_vouched(s, p) && shows_marks(p) ? p.member.id : std::uint64_t{};
+    };
     each_active_peer(s, [&](Peer &p) {
         // A dedicated server has no skater to show.
         if (!p.member.id || (dedicated_host(s) && p.member.id == s.host_id))

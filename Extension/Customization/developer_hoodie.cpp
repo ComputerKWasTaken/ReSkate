@@ -44,9 +44,10 @@ bool publish_materials(std::uintptr_t base, std::uintptr_t item) noexcept {
 } // namespace
 void update_developer_hoodie(std::uintptr_t base, std::uintptr_t entity, std::uint64_t steam_id,
                              std::uint64_t generation, DeveloperHoodieState &state) noexcept {
-    const bool developer = multiplayer::reskate_developer(steam_id);
+    const auto animation = developer_hoodie_detail::animation_for(steam_id);
+    const bool listed = animation != developer_hoodie_detail::Animation::none;
     if (!entity) { state = {}; return; }
-    if (!developer && !state.count) return;
+    if (!listed && !state.count) return;
     try {
         auto read = [](std::uintptr_t address, void *out, std::size_t size) { return memory::peek_bytes(address, out, size); };
         std::array<unsigned char, addr::native_cosmetics::publish_materials_prefix.size()> prefix{};
@@ -58,10 +59,11 @@ void update_developer_hoodie(std::uintptr_t base, std::uintptr_t entity, std::ui
         const auto live = developer_hoodie_detail::materials(read, base, entity);
         bool published = true;
         auto publish = [base, &published](std::uintptr_t item) { published = publish_materials(base, item); };
-        developer_hoodie_detail::animate(state, live, entity, generation, developer, GetTickCount64(), write_color, publish);
+        developer_hoodie_detail::animate(state, live, entity, generation, animation, GetTickCount64(), write_color, publish);
         if (!published) report_hoodie(entity, steam_id, "native material publication failed", logging::Level::warning);
-        else if (state.count) report_hoodie(entity, steam_id, "RGB active on the owned hoodie material", logging::Level::info);
-        else if (developer && live.eligible)
+        else if (listed && state.count)
+            report_hoodie(entity, steam_id, "animation active on the owned hoodie material", logging::Level::info);
+        else if (listed && live.eligible)
             report_hoodie(entity, steam_id, "waiting for the assigned top slot's color parameters", logging::Level::warning);
     } catch (const std::exception &error) {
         report_hoodie(entity, steam_id, error.what(), logging::Level::warning);
@@ -77,8 +79,8 @@ void tick_local_developer_hoodie(std::uintptr_t base, std::uintptr_t client, boo
     if (!ready) return;
     try {
         const auto social = multiplayer::steam_social_snapshot();
-        const auto id = social ? social->local.id : 0;
-        if (!multiplayer::reskate_developer(id) && !state.count) return;
+        const auto id = social && multiplayer::own_marks_shown() ? social->local.id : 0;
+        if (developer_hoodie_detail::animation_for(id) == developer_hoodie_detail::Animation::none && !state.count) return;
         const auto local = multiplayer::capture_local(base, client, false);
         if (local.ready) update_developer_hoodie(base, local.entity, id, local.context, state);
         else report_hoodie(client, id, local.detail, logging::Level::warning);

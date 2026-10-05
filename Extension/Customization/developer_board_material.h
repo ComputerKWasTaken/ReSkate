@@ -6,7 +6,10 @@ namespace dingosdk {
 namespace developer_board_detail {
 using developer_hoodie_detail::Color;
 using developer_hoodie_detail::material_hash;
-using developer_hoodie_detail::rainbow;
+using developer_hoodie_detail::Animation;
+using developer_hoodie_detail::animation_for;
+using developer_hoodie_detail::item_color;
+using developer_hoodie_detail::settle_publishes;
 inline constexpr std::uint64_t graphic_color = 0x873f48af36e50d59ULL;
 inline constexpr std::uint64_t base_color = 0x8c46cd354b18a9e2ULL;
 inline constexpr Color shader_default{.5f, .5f, .5f};
@@ -58,6 +61,7 @@ struct Binding {
 struct SavedColor {
     Binding binding;
     Color original{}, last{};
+    std::uint8_t settling{}; // publishes still owed after going back to `original`
 };
 inline constexpr std::size_t max_bindings = targets.size() * 4;
 struct Materials {
@@ -179,13 +183,13 @@ namespace developer_board_detail {
 // Never clear a NativeValue: the renderer still copies the key's full payload.
 template<class Write, class Publish>
 void animate(DeveloperBoardState &state, const Materials &live, std::uintptr_t entity, std::uint64_t generation,
-             bool developer, std::uint64_t milliseconds, Write &write, Publish &publish) {
+             Animation animation, std::uint64_t milliseconds, Write &write, Publish &publish) {
     if (state.entity != entity || state.generation != generation || state.component != live.component || state.appearance != live.appearance)
         state = {};
     if (live.pending) return;
     DeveloperBoardState next;
     next.entity = entity; next.generation = generation; next.component = live.component; next.appearance = live.appearance;
-    const auto color = rainbow(milliseconds);
+    const auto color = item_color(animation, milliseconds);
     std::array<std::uintptr_t, max_bindings> changed_items{};
     std::size_t changed{};
     for (std::size_t i = 0; i < live.count; ++i) {
@@ -194,14 +198,18 @@ void animate(DeveloperBoardState &state, const Materials &live, std::uintptr_t e
         for (std::size_t j = 0; j < state.count; ++j)
             if (same_binding(binding, state.colors[j].binding)) { saved = &state.colors[j]; break; }
         bool wrote{};
-        if (developer && binding.eligible) {
+        if (animation != Animation::none && binding.eligible) {
             const auto original = saved && binding.color == saved->last ? saved->original : binding.color;
             if ((binding.node && binding.color == color) || (wrote = write(binding, color)))
                 next.colors[next.count++] = {binding, original, color};
             else if (saved) next.colors[next.count++] = *saved;
-        } else if (saved && binding.color == saved->last && binding.color != saved->original) {
-            wrote = write(binding, saved->original);
+        } else if (saved && (binding.color == saved->last || binding.color == saved->original)) {
+            // Back to the part's own color, which takes a few publishes to show (settle_publishes):
+            // `wrote` has the part published for each of them.
+            wrote = binding.color == saved->original || write(binding, saved->original);
+            const std::uint8_t left = saved->settling ? saved->settling - 1 : settle_publishes;
             if (!wrote) next.colors[next.count++] = *saved;
+            else if (left) next.colors[next.count++] = {binding, saved->original, saved->original, left};
         }
         if (wrote && std::find(changed_items.begin(), changed_items.begin() + changed, binding.item) == changed_items.begin() + changed)
             changed_items[changed++] = binding.item;

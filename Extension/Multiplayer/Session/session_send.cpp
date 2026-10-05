@@ -595,7 +595,10 @@ void send_local(Session &s, const NativeFrame &local, std::uint64_t now, std::ui
     };
     if (now - s.last_cosmetic_capture >= 500000) {
         s.last_cosmetic_capture = now;
-        const auto appearance = capture_cosmetics(s.base, local, s.cosmetic_capture_status);
+        auto appearance = capture_cosmetics(s.base, local, s.cosmetic_capture_status);
+        // The player's choice to go without their marks travels with their outfit, so a change
+        // is sent like one and reaches players who join later.
+        if (appearance) appearance->unmarked = !own_marks_shown();
         if (appearance && (!s.sent_appearance || *appearance != *s.sent_appearance)) {
             auto p = packet(s, PacketKind::cosmetics, now);
             p.appearance = *appearance;

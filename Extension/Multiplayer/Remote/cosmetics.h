@@ -31,6 +31,9 @@ struct PlayerCard {
 struct Appearance {
     CosmeticRecipe skater, board;
     PlayerCard card;
+    // The player has turned off the marks the ReSkate backend gives them (developer_identity.h):
+    // nobody shows their tag or animates their hoodie and board.
+    bool unmarked{};
     bool operator==(const Appearance &) const = default;
 };
 // Stand-ins for a peer's cosmetic that this PC does not have (a player's

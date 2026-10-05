@@ -1,6 +1,7 @@
 #include "server_host.h"
 #include "server_text.h"
 #include "Extension/Multiplayer/Net/wire_codec.h"
+#include "Extension/Multiplayer/developer_identity.h"
 #include "Extension/Multiplayer/Session/monotonic_clock.h"
 #include "Engine/Core/Text/word_filter.h"
 #include "Engine/Game/Build/supported_build.h"
@@ -746,6 +747,11 @@ void Host::tick(std::uint64_t now) {
         }
         if (is_banned(link.id)) {
             transport_.disconnect(link.id, "You are banned from this server.");
+            continue;
+        }
+        // The backend's list (global_bans.h), which can reach a player who is already on.
+        if (config_.global_bans && multiplayer::reskate_banned(link.id)) {
+            transport_.disconnect(link.id, multiplayer::banned_notice.data());
             continue;
         }
         auto *guest = find(link.id);

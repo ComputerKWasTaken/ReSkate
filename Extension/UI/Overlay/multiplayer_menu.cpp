@@ -243,8 +243,9 @@ void multiplayer_display_settings(SkateMenu &menu, const Model &model) {
     }
     bool custom = mp.custom_nametags;
     if (toggle_row(menu, "ReSkate nametags",
-                   "Names with distance: purple for ReSkate developers, gold for server admins, blue for the host, "
-                   "green for your Steam friends; far and off-screen players as dots. Off: the game's own nametags and arrows.",
+                   "Names with distance: purple for ReSkate developers, red for content creators, gold for homies, "
+                   "pink for server admins, blue for the host, green for your Steam friends; far and off-screen players as dots. "
+                   "Off: the game's own nametags and arrows.",
                    custom, mp.nametags, "OFF")) {
         std::array<char, 65> unused{};
         send_private(menu, "nametag-style", custom ? "reskate" : "game", unused, false);
@@ -265,6 +266,23 @@ void multiplayer_display_settings(SkateMenu &menu, const Model &model) {
 }
 void multiplayer_network_page(SkateMenu &menu, const Model &model, const CallbacksV3 &callbacks) {
     debug_page(menu, model.multiplayer, callbacks);
+}
+// SPECIAL: the page only a player on one of the backend's lists gets. Their tag, and the hoodie
+// and board that come with it, on or off for everyone at once.
+void special_page(SkateMenu &menu, const Model &model, const CallbacksV3 &) {
+    const auto &mp = model.multiplayer;
+    ImGui::BeginChild("special", ImVec2(0, page_body_height(menu)));
+    begin_card(menu, "special-marks", "YOUR TAG", mp.identity_tag.c_str());
+    bool shown = mp.identity_marks;
+    if (toggle_row(menu, "Show my tag and items",
+                   "Your tag in chat and on your nametag, and the animated hoodie and board that come with it. "
+                   "Off: you look like any other player, to yourself and to everyone you skate with.",
+                   shown)) {
+        std::array<char, 65> unused{};
+        send_private(menu, "marks", shown ? "on" : "off", unused, false);
+    }
+    end_card();
+    ImGui::EndChild();
 }
 void multiplayer_page(SkateMenu &menu, const Model &model, const CallbacksV3 &callbacks) {
     const auto &mp = model.multiplayer;

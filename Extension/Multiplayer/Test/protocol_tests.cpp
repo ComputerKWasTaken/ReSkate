@@ -331,8 +331,14 @@ void cosmetics_codec() {
                     {board_recipe_key, 1, {0x3f800000}, {{13, "Own_Deck", {7}}}}};
     const auto bytes = encode(p);
     const auto decoded = decode(bytes);
-    check(decoded && decoded->appearance == p.appearance,
+    check(decoded && decoded->appearance == p.appearance && !decoded->appearance.unmarked,
           "Cosmetic fields or opaque parameter bits were lost");
+    // A player's choice to go without their backend marks travels with their outfit.
+    auto unmarked = p;
+    unmarked.appearance.unmarked = true;
+    const auto told = decode(encode(unmarked));
+    check(told && told->appearance.unmarked && told->appearance == unmarked.appearance && !(told->appearance == p.appearance),
+          "A player's choice to hide their marks was lost");
     for (std::size_t n = 0; n < bytes.size(); ++n)
         check(!decode(std::span(bytes).first(n)), "Truncated cosmetics accepted");
     auto corrupt = bytes;

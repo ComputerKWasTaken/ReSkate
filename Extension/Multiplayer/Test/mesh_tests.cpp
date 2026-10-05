@@ -39,6 +39,9 @@ void update_developer_hoodie(std::uintptr_t, std::uintptr_t, std::uint64_t, std:
 void update_developer_board(std::uintptr_t, std::uintptr_t, std::uint64_t, std::uint64_t, DeveloperBoardState &) noexcept {}
 }
 namespace dingosdk::multiplayer {
+// The backend's lists are not read here: a check lists the players it means.
+std::set<std::pair<std::uint64_t, IdentityList>> simulated_identities;
+bool identity_listed(std::uint64_t id, IdentityList list) noexcept { return simulated_identities.contains({id, list}); }
 bool local_allows_player_collision(std::uintptr_t, std::uintptr_t) noexcept { return false; }
 void update_remote_collision(std::uintptr_t, std::uintptr_t, const Pose &, bool, std::uint64_t) noexcept {}
 void expire_remote_collision(std::uintptr_t, std::uint64_t) noexcept {}
@@ -643,6 +646,94 @@ void party_checks() {
     stop(third, "Left"); sim.run(40);
     check(!host.local_party && host.parties.parties().empty(), "A guest who left the lobby stayed in the host's party");
     std::cout << "Lobby parties: nobody by default, invites, two parties, party chat, leaving and departures passed.\n";
+}
+// A player's badge and colour, in chat and on their nametag: who the backend lists them as
+// comes before what they are in the lobby, and a developer before the other lists.
+void role_checks() {
+    Simulation sim;
+    for (unsigned i = 0; i < 4; ++i) sim.add();
+    sim.run(60); sim.fresh(4);
+    auto &host = *sim.nodes[0], &first = *sim.nodes[1], &second = *sim.nodes[2], &third = *sim.nodes[3];
+    const auto id = [](const Session &s) { return s.transport.status().local_id; };
+    using Role = std::pair<std::uint32_t, std::string>;
+    using L = IdentityList;
+    check(player_role(first, id(host), false) == Role{nametag_host, "Host"} &&
+              player_role(host, id(host), true) == Role{nametag_host, "Host"} &&
+              player_role(host, id(first), false) == Role{nametag_white, {}},
+          "Players the backend does not list did not get their lobby roles");
+
+    simulated_identities = {{id(host), L::homie}, {id(first), L::content_creator},
+                            {id(second), L::developer}, {id(second), L::content_creator}, {id(second), L::homie},
+                            {id(third), L::content_creator}, {id(third), L::homie}};
+    check(player_role(first, id(host), false) == Role{nametag_homie, "Homie"} &&
+              player_role(host, id(host), true) == Role{nametag_homie, "Homie"},
+          "A homie who hosts is not shown as a homie");
+    check(player_role(host, id(first), false) == Role{nametag_creator, "Creator"} &&
+              player_role(first, id(first), true) == Role{nametag_creator, "Creator"},
+          "A content creator is not shown as one");
+    check(player_role(host, id(second), false) == Role{nametag_developer, "Dev"},
+          "A developer on every list is not shown as a developer");
+    check(player_role(host, id(third), false) == Role{nametag_creator, "Creator"},
+          "A content creator who is also a homie is not shown as a creator");
+    // A player who has turned their marks off (the Special page) is whatever they are in the lobby,
+    // to everyone: their appearance carries the choice through the host.
+    auto plain = packet(host, PacketKind::cosmetics, sim.now);
+    plain.appearance = {{skater_recipe_key, 2, {}, {{1, "Outfit0", {}}}}, {board_recipe_key, 1, {}, {{2, "Deck", {}}}}};
+    plain.appearance.unmarked = true;
+    host.cosmetic_packet = encode_wire(plain);
+    broadcast(host, plain, true, false, sim.now);
+    sim.run(20);
+    check(player_role(first, id(host), false) == Role{nametag_host, "Host"} &&
+              player_role(second, id(host), false) == Role{nametag_host, "Host"},
+          "A homie who turned their marks off still shows as a homie");
+    check(player_role(host, id(first), false) == Role{nametag_creator, "Creator"}, "One player's choice hid another's marks");
+    show_own_marks(false);
+    check(player_role(first, id(first), true) == Role{nametag_white, {}} &&
+              player_role(host, id(first), false) == Role{nametag_creator, "Creator"},
+          "A player's own choice did not hide their marks from themselves, or hid them from others before they were told");
+    show_own_marks(true);
+    // A chat line carries its sender's role.
+    check(send_chat(first, "new video is up").empty(), "A guest's chat was refused");
+    sim.run(20);
+    const auto said = std::find_if(host.chat.begin(), host.chat.end(), [](const auto &line) { return line.text == "new video is up"; });
+    check(said != host.chat.end() && said->color == nametag_creator && said->tag == "Creator",
+          "A content creator's chat line does not carry their role");
+    simulated_identities.clear();
+    std::cout << "Roles: lobby roles, homie, content creator, developer first and chat lines passed.\n";
+}
+// The backend's bans hold in every session, and reach one that is running: a banned guest is
+// out and cannot come back, the others stay, and nobody stays with a banned host.
+void global_ban_checks() {
+    Simulation sim;
+    for (unsigned i = 0; i < 3; ++i) sim.add();
+    sim.run(60); sim.fresh(3);
+    auto &host = *sim.nodes[0], &first = *sim.nodes[1], &second = *sim.nodes[2];
+    const auto id = [](const Session &s) { return s.transport.status().local_id; };
+    const auto first_id = id(first), host_id = id(host);
+
+    simulated_identities = {{first_id, IdentityList::banned}};
+    sim.run(40);
+    check(first.mode == Mode::off && first.status == banned_notice, "A banned guest stayed in the session");
+    check(!find_peer(host, first_id) && !find_peer(second, first_id), "The session kept a banned guest");
+    check(second.mode == Mode::join && find_peer(host, id(second)), "Banning one guest took another out");
+    // A banned player whose game does not stop itself is turned away by the host all the same.
+    first.mode = Mode::join;
+    first.host_id = host_id;
+    first.transport.join(host_id);
+    host.transport.poll();
+    networking(host, sim.local, sim.now);
+    const auto &links = host.transport.status().peers;
+    check(std::none_of(links.begin(), links.end(), [&](const auto &link) { return link.id == first_id; }) &&
+              !find_peer(host, first_id),
+          "The host let a banned player back in");
+    stop(first, "Left");
+
+    simulated_identities = {{host_id, IdentityList::banned}};
+    sim.run(40);
+    check(host.mode == Mode::off && host.status == banned_notice, "A banned host kept hosting");
+    check(second.mode == Mode::off, "A guest stayed with a banned host");
+    simulated_identities.clear();
+    std::cout << "Global bans: a banned guest, a guest who comes back, the other guests and a banned host passed.\n";
 }
 // A host that is kept from reading for a few seconds (a server whose console held it up) then
 // reads everything its guests sent meanwhile in one go. That is not a flood: nobody is dropped
@@ -1988,6 +2079,8 @@ int main(int argc, char **argv) {
         dingosdk::multiplayer::mesh_checks();
         dingosdk::multiplayer::throwdown_routing_checks();
         dingosdk::multiplayer::party_checks();
+        dingosdk::multiplayer::role_checks();
+        dingosdk::multiplayer::global_ban_checks();
         dingosdk::multiplayer::physics_extras_checks();
         dingosdk::multiplayer::stall_checks();
         dingosdk::multiplayer::scoring_checks();

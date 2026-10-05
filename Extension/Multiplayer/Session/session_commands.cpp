@@ -324,6 +324,15 @@ std::string edit_nametag_style(Session &s, std::string_view argument) {
     profile_runtime::set_local_preference("CustomNametags", s.custom_nametags);
     return s.custom_nametags ? "ReSkate nametags: names, distances and dots." : "The game's own nametags.";
 }
+// The Special page: a player on one of the backend's lists going without their tag and items.
+// Their next appearance packet tells everyone (session_send.cpp).
+std::string edit_marks(Session &, std::string_view argument) {
+    const auto shown = parse_switch(argument, own_marks_shown());
+    if (!shown) return "Use on, off, or toggle for your tag and items.";
+    show_own_marks(*shown);
+    profile_runtime::set_local_preference("IdentityMarks", *shown);
+    return *shown ? "Your tag and items show." : "Your tag and items are hidden, for you and everyone you skate with.";
+}
 // Hidden chat still receives lines, so showing it again brings back the conversation.
 std::string edit_chat_visible(Session &s, std::string_view argument) {
     const auto visible = parse_switch(argument, s.chat_visible);
@@ -438,10 +447,12 @@ std::string send_admin(Session &s, std::string text) {
 }
 } // namespace
 bool queue_command(std::string_view action, std::string_view argument, std::string_view password) {
-    if (launcher::offline_mode()) return false;
+    // A player's own marks are theirs offline as well, where their hoodie and board still animate.
+    if (launcher::offline_mode() && action != "marks") return false;
     if ((action != "host" && action != "host-config" && action != "join" && action != "join-lobby" && action != "join-friend-lobby" && action != "stop" &&
          action != "distances" && action != "object-placement" && action != "kick" && action != "clear-objects" &&
          action != "nametags" && action != "nametag-style" && action != "chat-visible" && action != "chat-filter" &&
+         action != "marks" &&
          action != "voice" && action != "voice-mute" &&
          action != "voice-volume" && action != "voice-allow" && action != "voice-range" && action != "chat" && action != "ban" && action != "unban" &&
          action != "world-layer-sync" && action != "noclip-allow" && action != "nobail-allow" && action != "boosts-allow" &&
@@ -465,7 +476,8 @@ bool queue_command(std::string_view action, std::string_view argument, std::stri
     return true;
 }
 std::string command(std::string_view action, std::string_view argument, std::string_view password) {
-    if (launcher::offline_mode()) return "Multiplayer is unavailable in offline mode. Start Steam and relaunch ReSkate.";
+    if (launcher::offline_mode() && action != "marks")
+        return "Multiplayer is unavailable in offline mode. Start Steam and relaunch ReSkate.";
     const bool configured_host = action == "host-config";
     if (configured_host) action = "host";
     PrivateRequest input;
@@ -620,6 +632,7 @@ std::string command(std::string_view action, std::string_view argument, std::str
             {"world-layer-sync", edit_world_layer_sync},   {"distances", edit_distances},
             {"nametags", edit_nametags},
             {"nametag-style", edit_nametag_style},
+            {"marks", edit_marks},
             {"chat-visible", edit_chat_visible}, {"chat-filter", edit_chat_filter}};
         for (const auto &[name, edit] : settings)
             if (action == name) {
@@ -705,6 +718,8 @@ std::string command(std::string_view action, std::string_view argument, std::str
             publish(s);
             return s.status;
         };
+        // Joining is for the host or the server to refuse (a server may opt out of the bans).
+        if (action == "host" && reskate_banned(s.transport.status().local_id)) return refuse(std::string(banned_notice));
         if (action == "host") {
             const auto space = argument.find(' ');
             if (space != std::string_view::npos) {

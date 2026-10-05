@@ -46,9 +46,10 @@ bool publish_materials(std::uintptr_t base, std::uintptr_t item) noexcept {
 } // namespace
 void update_developer_board(std::uintptr_t base, std::uintptr_t board, std::uint64_t steam_id,
                             std::uint64_t generation, DeveloperBoardState &state) noexcept {
-    const bool developer = multiplayer::reskate_developer(steam_id);
+    const auto animation = developer_board_detail::animation_for(steam_id);
+    const bool listed = animation != developer_board_detail::Animation::none;
     if (!board) { state = {}; return; }
-    if (!developer && !state.count) return;
+    if (!listed && !state.count) return;
     try {
         auto read = [](std::uintptr_t address, void *out, std::size_t size) { return memory::peek_bytes(address, out, size); };
         std::array<unsigned char, addr::native_cosmetics::publish_materials_prefix.size()> publisher{};
@@ -64,14 +65,14 @@ void update_developer_board(std::uintptr_t base, std::uintptr_t board, std::uint
         bool published = true;
         auto write = [base](const auto &binding, const auto &color) { return write_color(base, binding, color); };
         auto publish = [base, &published](std::uintptr_t item) { if (!publish_materials(base, item)) published = false; };
-        developer_board_detail::animate(state, live, board, generation, developer, GetTickCount64(), write, publish);
+        developer_board_detail::animate(state, live, board, generation, animation, GetTickCount64(), write, publish);
         const auto wanted = static_cast<std::size_t>(std::count_if(live.bindings.begin(), live.bindings.begin() + live.count,
                                                                 [](const auto &binding) { return binding.eligible; }));
         if (!published) report_board(board, steam_id, "native material publication failed", logging::Level::warning);
-        else if (developer && !live.pending && state.count < wanted)
+        else if (listed && !live.pending && state.count < wanted)
             report_board(board, steam_id, "waiting for the remaining board color overrides", logging::Level::warning);
-        else if (developer && state.count)
-            report_board(board, steam_id, "RGB active on the owned pink board cosmetics", logging::Level::info);
+        else if (listed && state.count)
+            report_board(board, steam_id, "animation active on the owned pink board cosmetics", logging::Level::info);
     } catch (const std::exception &error) {
         report_board(board, steam_id, error.what(), logging::Level::warning);
     } catch (...) {}
@@ -81,8 +82,8 @@ void tick_local_developer_board(std::uintptr_t base, std::uintptr_t client, bool
     if (!ready) return;
     try {
         const auto social = multiplayer::steam_social_snapshot();
-        const auto id = social ? social->local.id : 0;
-        if (!multiplayer::reskate_developer(id) && !state.count) return;
+        const auto id = social && multiplayer::own_marks_shown() ? social->local.id : 0;
+        if (developer_board_detail::animation_for(id) == developer_board_detail::Animation::none && !state.count) return;
         const auto local = multiplayer::capture_local(base, client, false);
         if (!local.ready) return;
         auto read = [](std::uintptr_t address, void *out, std::size_t size) { return memory::peek_bytes(address, out, size); };

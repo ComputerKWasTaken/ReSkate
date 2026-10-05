@@ -2,6 +2,7 @@
 // in-game server browser. Runs from its own folder, next to steam_api64.dll and
 // the Steam client files (steamclient64.dll, tier0_s64.dll, vstdlib_s64.dll).
 // On Linux the Steam files are libsteam_api.so and steamclient.so.
+#include "global_bans.h"
 #include "server_config.h"
 #include "server_host.h"
 #include "server_update.h"
@@ -393,6 +394,12 @@ int run(int argc, char **argv, bool skip_update) {
     auto next_update_check = next_advertise + update_interval;
     std::future<UpdateCheck> update_check;
     bool update_now{}, update_waiting{}, restart{};
+    // The backend's ban list (global_bans.h): read now and every ten minutes, a minute after a
+    // failure. "global_bans": false leaves it unread and lets those players in.
+    std::future<BanListCheck> ban_check;
+    auto next_ban_check = next_advertise;
+    bool bans_unread{};
+    if (!config.global_bans) write_log("Global bans are off (\"global_bans\": false): only this server's own bans apply.");
     while (!stopping && !restart) {
         steam.run_callbacks();
         try {
@@ -447,6 +454,19 @@ int run(int argc, char **argv, bool skip_update) {
             }
             update_now = false;
         }
+        if (config.global_bans && !ban_check.valid() && now_time >= next_ban_check)
+            ban_check = std::async(std::launch::async, read_global_bans);
+        if (ban_check.valid() && ban_check.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+            const auto check = ban_check.get();
+            next_ban_check = now_time + (check.ok ? std::chrono::minutes(10) : std::chrono::minutes(1));
+            // Said when it changes, not every ten minutes.
+            if (check.ok && (check.changed || bans_unread))
+                write_log("Global bans: " + std::to_string(check.banned) + " player(s) banned from ReSkate multiplayer cannot join.");
+            else if (!check.ok && !bans_unread)
+                write_log("The global ban list could not be read (" + check.problem + "). Trying again every minute; " +
+                          "until then the bans already read hold.");
+            bans_unread = !check.ok;
+        }
         if (update_waiting && !restart && host.players() == 0) {
             write_log("Nobody is on; restarting to install server update " + update_version + ".");
             restart = true;
@@ -478,6 +498,7 @@ int run(int argc, char **argv, bool skip_update) {
     input.shutdown();
 #endif
     if (update_check.valid()) update_check.wait();
+    if (ban_check.valid()) ban_check.wait();
     write_log(restart ? "Restarting for an update." : "Shutting down.");
     host.stop(restart ? "The server is restarting for an update. Rejoin in a minute." : "The server is shutting down.");
     // Leaving scope closes the networking before Steam itself shuts down.
