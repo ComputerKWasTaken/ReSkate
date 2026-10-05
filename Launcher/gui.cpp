@@ -9,6 +9,8 @@
 #include <windowsx.h>
 #include <shellapi.h>
 
+#include <imgui_internal.h>
+
 #include <backends/imgui_impl_dx12.h>
 #include <backends/imgui_impl_win32.h>
 
@@ -21,6 +23,21 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM,
 namespace dingosdk::launcher_gui {
 namespace detail {
 
+namespace {
+
+// Keeps a panel or page in front, but not over its own open combo or popup, and
+// not while the focus is already inside it: focusing the window again every
+// frame would pull a controller's focus out of its child panels.
+void keep_in_front(const char* id) {
+    if (ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId)) return;
+    const ImGuiWindow* window = ImGui::FindWindowByName(id);
+    const ImGuiWindow* focused = GImGui->NavWindow;
+    if (window && focused && focused->RootWindow == window) return;
+    ImGui::SetNextWindowFocus();
+}
+
+} // namespace
+
 void panel_title(const Fonts& fonts, const char* text) {
     ImGui::PushFont(fonts.tile);
     ImGui::TextUnformatted(text);
@@ -30,8 +47,7 @@ void panel_title(const Fonts& fonts, const char* text) {
 ImVec2 begin_panel(const char* id, ImVec2 size, ImVec2 panel) {
     ImGui::SetNextWindowPos(ImVec2((size.x - panel.x) * 0.5f, (size.y - panel.y) * 0.5f));
     ImGui::SetNextWindowSize(panel);
-    // Keep panels in front, but not over their own open combo or popup.
-    if (!ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId)) ImGui::SetNextWindowFocus();
+    keep_in_front(id);
     ImGui::Begin(id, nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
     return panel;
 }
@@ -39,7 +55,7 @@ ImVec2 begin_panel(const char* id, ImVec2 size, ImVec2 panel) {
 ImVec2 begin_page(const char* id, ImVec2 size) {
     ImGui::SetNextWindowPos(ImVec2(0, 0));
     ImGui::SetNextWindowSize(size);
-    if (!ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId)) ImGui::SetNextWindowFocus();
+    keep_in_front(id);
     // Opaque, and darker than a tile: a page covers the window, so the main
     // screen must not show through, and its tiles need something to sit on.
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImGui::ColorConvertU32ToFloat4(rgba(14, 15, 18)));
@@ -475,6 +491,10 @@ int run(const launcher_app::Session& session, const std::vector<std::wstring>& a
             pad_feed.update(ImGui::GetIO(), foreground ? read_pad() : PadState{}, g_scale);
             ImGui::NewFrame();
             frame(launcher, fonts, window, ui, mods_panel);
+            // While the pad moves the focus, the mouse cursor (the Deck's trackpad in its
+            // desktop layout) hides; the next mouse move hides the focus and brings it back.
+            if (GImGui->NavCursorVisible && GImGui->NavHighlightItemUnderNav && !pad_feed.pointing())
+                ImGui::SetMouseCursor(ImGuiMouseCursor_None);
             ImGui::Render();
             renderer.render();
             if (!drew) {
