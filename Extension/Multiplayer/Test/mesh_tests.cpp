@@ -35,8 +35,10 @@ bool clear_lobby_guest_objects() { ++simulated_guest_wipes; return true; }
 namespace dingosdk {
 bool teleport_local_skater(const std::array<float, 3>&) { return true; }
 void update_board_lock(std::uintptr_t, std::uintptr_t, bool) noexcept {}
-void update_developer_hoodie(std::uintptr_t, std::uintptr_t, std::uint64_t, std::uint64_t, DeveloperHoodieState &) noexcept {}
-void update_developer_board(std::uintptr_t, std::uintptr_t, std::uint64_t, std::uint64_t, DeveloperBoardState &) noexcept {}
+void update_developer_hoodie(std::uintptr_t, std::uintptr_t, std::uint64_t, std::uint64_t, DeveloperHoodieState &,
+                             const multiplayer::MarkStyles &) noexcept {}
+void update_developer_board(std::uintptr_t, std::uintptr_t, std::uint64_t, std::uint64_t, DeveloperBoardState &,
+                            const multiplayer::MarkStyles &) noexcept {}
 }
 namespace dingosdk::multiplayer {
 // The backend's lists are not read here: a check lists the players it means.
@@ -675,23 +677,43 @@ void role_checks() {
           "A developer on every list is not shown as a developer");
     check(player_role(host, id(third), false) == Role{nametag_creator, "Creator"},
           "A content creator who is also a homie is not shown as a creator");
-    // A player who has turned their marks off (the Special page) is whatever they are in the lobby,
-    // to everyone: their appearance carries the choice through the host.
+    // A player who has turned their tag off (the Special page) is whatever they are in the lobby,
+    // to everyone: their appearance carries the choice through the host. Their items are a
+    // separate choice, which leaves the tag alone.
     auto plain = packet(host, PacketKind::cosmetics, sim.now);
     plain.appearance = {{skater_recipe_key, 2, {}, {{1, "Outfit0", {}}}}, {board_recipe_key, 1, {}, {{2, "Deck", {}}}}};
-    plain.appearance.unmarked = true;
+    plain.appearance.hide_items = true;
+    host.cosmetic_packet = encode_wire(plain);
+    broadcast(host, plain, true, false, sim.now);
+    sim.run(20);
+    const auto told = [&](const Session &s) {
+        const auto *peer = find_peer(const_cast<Session &>(s), id(host));
+        return peer && !shows_items(*peer) && shows_tag(*peer);
+    };
+    check(told(first) && told(second) && player_role(first, id(host), false) == Role{nametag_homie, "Homie"},
+          "A homie who turned their items off was not seen to, or lost their tag");
+    // A later packet, as the host's game would send after the change.
+    const auto look = plain.appearance;
+    plain = packet(host, PacketKind::cosmetics, sim.now);
+    plain.appearance = look;
+    plain.appearance.hide_items = false, plain.appearance.hide_tag = true;
     host.cosmetic_packet = encode_wire(plain);
     broadcast(host, plain, true, false, sim.now);
     sim.run(20);
     check(player_role(first, id(host), false) == Role{nametag_host, "Host"} &&
               player_role(second, id(host), false) == Role{nametag_host, "Host"},
-          "A homie who turned their marks off still shows as a homie");
-    check(player_role(host, id(first), false) == Role{nametag_creator, "Creator"}, "One player's choice hid another's marks");
-    show_own_marks(false);
+          "A homie who turned their tag off still shows as a homie");
+    const auto *shown = find_peer(first, id(host));
+    check(shown && shows_items(*shown), "Turning their tag off turned a player's items off");
+    check(player_role(host, id(first), false) == Role{nametag_creator, "Creator"}, "One player's choice hid another's tag");
+    show_own_items(false);
+    check(player_role(first, id(first), true) == Role{nametag_creator, "Creator"}, "Turning their items off hid a player's own tag");
+    show_own_items(true);
+    show_own_tag(false);
     check(player_role(first, id(first), true) == Role{nametag_white, {}} &&
               player_role(host, id(first), false) == Role{nametag_creator, "Creator"},
-          "A player's own choice did not hide their marks from themselves, or hid them from others before they were told");
-    show_own_marks(true);
+          "A player's own choice did not hide their tag from themselves, or hid it from others before they were told");
+    show_own_tag(true);
     // A chat line carries its sender's role.
     check(send_chat(first, "new video is up").empty(), "A guest's chat was refused");
     sim.run(20);

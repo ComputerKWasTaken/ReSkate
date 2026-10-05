@@ -310,11 +310,22 @@ inline bool dedicated_host(const Session &s) { return s.mode == Mode::join && ga
 inline bool steam_vouched(const Session &s, const Peer &peer) {
     return s.mode != Mode::join || peer.member.id == s.host_id || peer.direct_ready;
 }
-// Whether a player shows the marks the backend gives them: not until their appearance has
-// arrived, and not when it says they turned them off (Appearance::unmarked).
-inline bool shows_marks(const Peer &peer) {
+// Whether a player shows the tag the backend gives them, and whether the items that come with
+// it animate: not until their appearance has arrived, and not when it says they turned that
+// off (Appearance::hide_tag, Appearance::hide_items).
+inline bool shows_tag(const Peer &peer) {
     const auto &look = peer.appearance.value();
-    return look && !look->unmarked;
+    return look && !look->hide_tag;
+}
+inline bool shows_items(const Peer &peer) {
+    const auto &look = peer.appearance.value();
+    return look && !look->hide_items;
+}
+// How a player has each of their marked cosmetics animate: what their appearance says.
+inline const MarkStyles &mark_styles(const Peer &peer) {
+    static const MarkStyles standard{};
+    const auto &look = peer.appearance.value();
+    return look ? look->marks : standard;
 }
 Peer *find_peer(Session &s, std::uint64_t id);
 unsigned player_count(const Session &s);

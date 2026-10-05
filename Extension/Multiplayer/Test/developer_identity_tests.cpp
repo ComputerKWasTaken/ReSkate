@@ -82,33 +82,41 @@ void lookup() {
               identity_mark(creator) == L::content_creator && identity_mark(homie) == L::homie && !identity_mark(stranger) &&
               !identity_mark(0),
           "A player's mark is not the first list they are on");
-    check(own_marks_shown(), "A player's marks start hidden");
-    show_own_marks(false);
-    check(!own_marks_shown() && identity_mark(dev) == L::developer, "Hiding their own marks did not take, or changed the lists");
-    show_own_marks(true);
+    // Their tag and their items are each their own to hide.
+    check(own_tag_shown() && own_items_shown(), "A player's tag or items start hidden");
+    show_own_tag(false);
+    check(!own_tag_shown() && own_items_shown() && identity_mark(dev) == L::developer,
+          "Hiding their own tag did not take, hid their items, or changed the lists");
+    show_own_tag(true);
+    show_own_items(false);
+    check(own_tag_shown() && !own_items_shown(), "Hiding their own items did not take, or hid their tag");
+    show_own_items(true);
     check(publish_identity_lists({{{dev, other_dev}, {homie}, {creator}}}), "The lists did not go back");
     // Removing someone in the panel takes their mark away at the next refresh.
     check(publish_identity_lists({{{dev}, {}, {}}}) && reskate_developer(dev) && !reskate_developer(other_dev) &&
               !identity_listed(homie, L::homie),
           "Replaced lists kept a player who was removed");
 }
-// The hoodie and board: a developer's rainbow, a content creator's red, a homie's gold.
+// The hoodie and board: what a list gives a cosmetic, and what a player makes of it on the Special page.
 void items() {
     using namespace dingosdk::developer_hoodie_detail;
-    publish_identity_lists({{{dev}, {dev, homie, creator}, {dev, creator}}});
-    check(animation_for(dev) == Animation::rainbow && animation_for(creator) == Animation::red &&
-              animation_for(homie) == Animation::gold,
-          "A list did not give its animation, a developer's first and a content creator's before a homie's");
-    check(animation_for(stranger) == Animation::none && animation_for(0) == Animation::none, "An unlisted player's items animate");
-    check(item_color(Animation::rainbow, 0) == rainbow(0) && item_color(Animation::rainbow, 3000) == rainbow(3000),
-          "The developer's rainbow changed");
-    // Each goes from a deep shade to a bright one, on into the colour next to it, and back
+    using dingosdk::multiplayer::MarkMode;
+    using dingosdk::multiplayer::MarkStyle;
+    using dingosdk::multiplayer::MarkStyles;
+    const MarkStyle standard{};
+    const auto spectrum = item_animation(L::developer, standard), red = item_animation(L::content_creator, standard),
+               gold = item_animation(L::homie, standard);
+    check(spectrum.on && spectrum.rainbow && red.on && !red.rainbow && gold.on && !gold.rainbow &&
+              !item_animation(std::nullopt, standard).on,
+          "A list did not give its animation, or a player on none got one");
+    check(item_color(spectrum, 0) == rainbow(0) && item_color(spectrum, 3000) == rainbow(3000), "The developer's rainbow changed");
+    // Red and gold go from a deep shade to a bright one, on into the colour next to it, and back
     // every three seconds.
-    for (const auto animation : {Animation::red, Animation::gold}) {
-        const auto deep = item_color(animation, 0), bright = item_color(animation, 750), far = item_color(animation, 1500);
-        check(item_color(animation, 3000) == deep && item_color(animation, 4500) == far, "An animation does not repeat every three seconds");
+    for (const auto *animation : {&red, &gold}) {
+        const auto deep = item_color(*animation, 0), bright = item_color(*animation, 750), far = item_color(*animation, 1500);
+        check(item_color(*animation, 3000) == deep && item_color(*animation, 4500) == far, "An animation does not repeat every three seconds");
         check(bright[0] > deep[0] * 2 && far[0] >= bright[0], "An animation does not go from deep to bright");
-        if (animation == Animation::red) {
+        if (animation == &red) {
             // A content creator's: red, then a reddish pink.
             check(bright[1] < bright[0] * .1f && bright[2] < bright[0] * .1f, "Red is not red");
             check(far[2] > bright[2] * 3 && far[2] < far[0] * .4f && far[1] < far[0] * .15f, "Red does not go on into a reddish pink");
@@ -119,81 +127,177 @@ void items() {
         }
         for (std::uint64_t at = 0; at < 6000; at += 125) {
             // The material's gamut, and red always the strongest part of the colour.
-            const auto color = item_color(animation, at);
+            const auto color = item_color(*animation, at);
             check(color[0] <= .801f && color[1] > 0 && color[2] > 0 && color[0] > color[1] && color[0] > color[2],
                   "An animation leaves its colours");
         }
     }
+
+    // A cosmetic turned off, and one given the player's own two colours.
+    const MarkStyle off{MarkMode::off, {}, {}, 0}, own{MarkMode::gradient, {255, 0, 0}, {0, 0, 255}, 0};
+    check(!item_animation(L::developer, off).on && !item_animation(L::homie, off).on, "A cosmetic turned off still animates");
+    const auto custom = item_animation(L::homie, own);
+    const auto first = item_color(custom, 0), last = item_color(custom, 1500), half = item_color(custom, 750);
+    check(custom.on && !custom.rainbow && first[0] > .7f && first[2] < .01f && last[2] > .7f && last[0] < .01f && half[0] > .3f &&
+              half[2] > .3f && item_color(custom, 3000) == first,
+          "A player's own colours are not what their cosmetic moves between");
+    // A developer can leave the rainbow for colours of their own; no style gives anyone else the rainbow.
+    check(!item_animation(L::developer, own).rainbow && item_animation(L::developer, own).on, "A developer cannot have their own colours");
+    // One colour of their own stands still, at any speed.
+    const auto still = item_animation(L::homie, {MarkMode::solid, {0, 255, 0}, {9, 9, 9}, 2});
+    check(still.on && !still.rainbow && item_color(still, 0) == material_color({0, 255, 0}) && item_color(still, 0)[1] > .7f &&
+              item_color(still, 777) == item_color(still, 0) && item_color(still, 1500) == item_color(still, 0),
+          "A solid colour is not the colour picked, or does not stand still");
+    for (const auto mode : {MarkMode::standard, MarkMode::gradient, MarkMode::solid})
+        check(!item_animation(L::content_creator, {mode, {}, {}, 0}).rainbow && !item_animation(L::homie, {mode, {}, {}, 0}).rainbow,
+              "A style gave the rainbow to someone who is not a developer");
+    // Slow takes twice as long and fast half, for the rainbow too.
+    check(item_animation(L::homie, {MarkMode::gradient, {}, {}, 1}).period == 6000 &&
+              item_animation(L::homie, {MarkMode::standard, {}, {}, 2}).period == 1500 &&
+              item_animation(L::developer, {MarkMode::standard, {}, {}, 1}).period == 16000 &&
+              item_animation(L::developer, {MarkMode::standard, {}, {}, 2}).period == 4000 &&
+              item_color(item_animation(L::developer, {MarkMode::standard, {}, {}, 2}), 1000) == rainbow(2000),
+          "The speed is not half or twice the usual");
+    // The pickers start from colours close to the list's own.
+    const auto picks = standard_picks(L::content_creator);
+    const auto start = material_color(picks.first), finish = material_color(picks.second);
+    check(std::abs(start[0] - .2f) < .02f && start[1] < .02f && std::abs(finish[0] - .8f) < .01f && std::abs(finish[2] - .13f) < .02f,
+          "A content creator's pickers do not start from their red");
+
+    // The styles are kept in the profile as text.
+    MarkStyles styles{};
+    styles[0] = own, styles[2] = off, styles[4] = {MarkMode::gradient, {1, 2, 3}, {254, 253, 252}, 2};
+    styles.back() = {MarkMode::solid, {7, 8, 9}, {}, 0};
+    const auto text = mark_styles_text(styles);
+    check(text.size() == styles.size() * 16 && parse_mark_styles(text) == styles && parse_mark_styles(mark_styles_text({})) == MarkStyles{},
+          "The styles did not come back from their text");
+    check(!parse_mark_styles("") && !parse_mark_styles("00") && !parse_mark_styles(std::string(text.size(), 'f')) &&
+              !parse_mark_styles(std::string(text.size(), 'g')) && !parse_mark_styles(text + "00") &&
+              !parse_mark_styles(std::string_view(text).substr(16)),
+          "Text that is not styles was read as some");
+    // Every marked cosmetic has a name, the skater's before the board's.
+    check(dingosdk::multiplayer::mark_item_names.size() == slots.size() + dingosdk::developer_board_detail::part_count &&
+              dingosdk::multiplayer::mark_item_names[slots.size()] == "Deck" && slots[2] == "CAS_Footwear_Slot",
+          "The marked cosmetics and their names do not line up");
 }
 
-// Turning the animation off (the Special page, or a list that no longer has the player) puts an
-// item's own colours back, and publishes them the extra times the renderer needs to show them.
+// Whatever a player wears is coloured where the item colours itself, each cosmetic on its own;
+// turning one off (the Special page, or a list that no longer has the player) puts its own
+// colours back, and publishes them the extra times the renderer needs to show them.
 void settling() {
     using namespace dingosdk::developer_hoodie_detail;
+    using dingosdk::multiplayer::MarkMode;
+    const auto red = item_animation(L::content_creator, {}), gold = item_animation(L::homie, {});
+    const ItemAnimation none;
+    using Skater = std::array<ItemAnimation, slots.size()>;
+    const auto wearing = [&](const ItemAnimation &top, const ItemAnimation &shoes) {
+        Skater out{};
+        out[0] = top, out[2] = shoes;
+        return out;
+    };
+    const Skater bare{};
     const Color black{.02f, .02f, .02f}, navy{.02f, .02f, .2f}, teal{.02f, .3f, .3f};
-    // What the game holds for each colour region; the materials are read afresh each tick, as in game.
-    std::array<Color, 2> held{black, navy};
+    const auto bound = [](std::uintptr_t item, std::uintptr_t node, std::uint64_t key, const Color &color, std::uint8_t part) {
+        return Binding{item, item + 40, node, {0, sizeof(Color), 1, 1, key}, color, part};
+    };
+    // What the game holds for each colour, read afresh each tick as in game: a top with two
+    // regions it colours and one it leaves to its texture, and shoes that colour none of theirs.
+    std::array<Color, 4> held{black, navy, neutral, neutral};
     dingosdk::DeveloperHoodieState state;
     Materials live;
-    live.component = 1, live.appearance = 2, live.item = 3, live.eligible = true, live.count = 2;
-    live.bindings[0] = {10, 100, 7, color_keys[0], black};
-    live.bindings[1] = {10, 101, 7, color_keys[3], navy};
-    int publishes{};
+    live.component = 1, live.appearance = 2, live.regions_only = true;
+    live.bindings = {bound(10, 100, color_keys[0], black, 0), bound(10, 101, color_keys[3], navy, 0),
+                     bound(10, 102, color_keys[7], neutral, 0), bound(11, 103, color_keys[0], neutral, 2)};
+    std::vector<std::uintptr_t> published;
+    int writes{};
     auto write = [&](const Binding &binding, const Color &color) {
         held[binding.node - 100] = color;
+        ++writes;
         return true;
     };
-    auto publish = [&](std::uintptr_t) { ++publishes; };
-    const auto tick = [&](Animation animation, std::uint64_t at) {
+    auto publish = [&](std::uintptr_t item) { published.push_back(item); };
+    const auto tick = [&](const Skater &animations, std::uint64_t at) {
         for (std::size_t i = 0; i < held.size(); ++i) live.bindings[i].color = held[i];
-        animate(state, live, 5, 6, animation, at, write, publish);
+        animate(state, live, 5, 6, animations, at, write, publish);
     };
-    tick(Animation::red, 0);
-    tick(Animation::red, 700);
-    check(state.count == 2 && held[0] == item_color(Animation::red, 700) && held[1] == held[0] && publishes == 2,
-          "The animation did not colour the hoodie");
-    publishes = 0;
-    tick(Animation::none, 800);
-    check(held[0] == black && held[1] == navy && publishes == 1, "Turning it off did not bring the hoodie's own colours back");
-    for (std::uint64_t at = 900; at < 910; ++at) tick(Animation::none, at);
-    check(publishes == 1 + settle_publishes && !state.count && held[0] == black && held[1] == navy,
-          "The own colours were not published the extra times, or the hoodie was not left alone after");
+    using Items = std::vector<std::uintptr_t>;
+    tick(wearing(red, none), 0);
+    tick(wearing(red, none), 700);
+    check(state.colors.size() == 2 && held[0] == item_color(red, 700) && held[1] == held[0] && held[2] == neutral &&
+              held[3] == neutral && published == Items{10, 10},
+          "The top's own regions were not coloured, or more than them was");
+    // Shoes that colour none of their regions take the colour on all of them.
+    tick(wearing(red, gold), 800);
+    check(held[3] == item_color(gold, 800) && held[2] == neutral && held[0] == item_color(red, 800) && state.colors.size() == 3,
+          "An item with no colours of its own was not coloured, or cosmetics did not each take their own");
+    published.clear();
+    tick(bare, 900);
+    check(held[0] == black && held[1] == navy && held[3] == neutral && published == Items{10, 11},
+          "Turning it off did not bring the items' own colours back");
+    for (std::uint64_t at = 901; at < 911; ++at) tick(bare, at);
+    check(published.size() == 2 * (1 + settle_publishes) && state.colors.empty() && held[0] == black && held[1] == navy,
+          "The own colours were not published the extra times, or the items were not left alone after");
     // A colour the game itself sets meanwhile is the game's to keep.
-    tick(Animation::gold, 1000);
+    tick(wearing(gold, none), 1000);
     held[0] = teal;
-    tick(Animation::none, 1100);
+    tick(bare, 1100);
     check(held[0] == teal && held[1] == navy, "Turning it off overwrote a colour the game had set");
     // And it comes back on with the own colours still known.
-    for (std::uint64_t at = 1200; at < 1210; ++at) tick(Animation::none, at);
-    tick(Animation::red, 2000);
-    tick(Animation::none, 2100);
-    check(held[0] == teal && held[1] == navy, "A second round lost the hoodie's own colours");
+    for (std::uint64_t at = 1200; at < 1210; ++at) tick(bare, at);
+    tick(wearing(red, none), 2000);
+    tick(bare, 2100);
+    check(held[0] == teal && held[1] == navy, "A second round lost the top's own colours");
+    for (std::uint64_t at = 2200; at < 2210; ++at) tick(bare, at);
 
-    // The board does the same, part by part.
+    // A colour that stands still is written once, and published until the renderer shows it.
+    const auto still = item_animation(L::homie, {MarkMode::solid, {0, 255, 0}, {}, 0});
+    published.clear(), writes = 0;
+    for (std::uint64_t at = 3000; at < 3010; ++at) tick(wearing(still, none), at);
+    check(held[0] == item_color(still, 0) && held[1] == held[0] && writes == 2 && published == Items(1 + settle_publishes, 10),
+          "A solid colour was written again and again, or not published until it showed");
+    // While a recipe is on its way nothing is touched, and what was saved is kept.
+    live.pending = true;
+    tick(bare, 4000);
+    check(held[0] == item_color(still, 0) && state.colors.size() == 2 && writes == 2, "A pending recipe was written to");
+    live.pending = false;
+    tick(bare, 4100);
+    check(held[0] == teal && held[1] == navy, "The own colours were lost while a recipe was pending");
+
+    // The board does the same, each of its parts on its own: here the deck and the wheels, whose
+    // material has no colour of its own until one is added.
     namespace board = dingosdk::developer_board_detail;
-    std::array<Color, 2> painted{black, navy};
+    std::array<Color, 2> painted{black, board::shader_default};
     dingosdk::DeveloperBoardState deck;
-    board::Materials parts;
-    parts.component = 1, parts.appearance = 2, parts.count = 2;
-    parts.bindings[0] = {30, 10, 100, 7, board::parameter_key(board::base_color, 1), black, true};
-    parts.bindings[1] = {31, 11, 101, 7, board::parameter_key(board::base_color, 1), navy, true};
+    Materials parts;
+    parts.component = 1, parts.appearance = 2;
+    parts.bindings = {Binding{30, 10, 100, board::parameter_key(board::base_color, 1), black, 0},
+                      Binding{31, 11, 0, board::parameter_key(board::base_color, 1), board::shader_default, 3}};
     int shown{};
-    auto paint = [&](const board::Binding &binding, const Color &color) {
-        painted[binding.node - 100] = color;
+    bool added{};
+    auto paint = [&](const Binding &binding, const Color &color) {
+        if (!binding.node) added = true; // the engine adds the missing parameter
+        painted[binding.part ? 1 : 0] = color;
         return true;
     };
     auto show = [&](std::uintptr_t) { ++shown; };
-    const auto roll = [&](Animation animation, std::uint64_t at) {
-        for (std::size_t i = 0; i < painted.size(); ++i) parts.bindings[i].color = painted[i];
-        board::animate(deck, parts, 5, 6, animation, at, paint, show);
+    using Board = std::array<ItemAnimation, board::part_count>;
+    const auto roll = [&](const ItemAnimation &on_deck, const ItemAnimation &on_wheels, std::uint64_t at) {
+        parts.bindings[0].color = painted[0], parts.bindings[1].color = painted[1];
+        parts.bindings[1].node = added ? 101 : 0;
+        animate(deck, parts, 5, 6, Board{on_deck, none, none, on_wheels}, at, paint, show);
     };
-    roll(Animation::gold, 0);
-    roll(Animation::gold, 700);
-    check(deck.count == 2 && painted[0] == item_color(Animation::gold, 700) && painted[1] == painted[0], "The animation did not colour the board");
+    roll(gold, red, 0);
+    roll(gold, red, 700);
+    check(deck.colors.size() == 2 && added && painted[0] == item_color(gold, 700) && painted[1] == item_color(red, 700),
+          "The board's parts did not each take their own animation, or a missing colour was not added");
+    // The wheels alone turned off: back to the shaders' default, while the deck goes on.
+    for (std::uint64_t at = 800; at < 810; ++at) roll(gold, none, at);
+    check(painted[0] == item_color(gold, 809) && painted[1] == board::shader_default && deck.colors.size() == 1,
+          "Turning one part off stopped another, or did not stop it");
     shown = 0;
-    for (std::uint64_t at = 800; at < 810; ++at) roll(Animation::none, at);
-    check(painted[0] == black && painted[1] == navy && shown == 2 * (1 + settle_publishes) && !deck.count,
-          "Turning it off did not bring the board's own colours back and publish each part the extra times");
+    for (std::uint64_t at = 900; at < 910; ++at) roll(none, none, at);
+    check(painted[0] == black && painted[1] == board::shader_default && shown == 1 + settle_publishes && deck.colors.empty(),
+          "Turning it off did not bring the board's own colours back and publish them the extra times");
 }
 
 // --live <SteamID64>: the deployed backend, read the way the game reads it. Not

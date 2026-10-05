@@ -237,7 +237,7 @@ bool valid_appearance(const Appearance &a) noexcept {
     if (a.skater.key != skater_recipe_key || a.skater.version != 2 || a.board.key != board_recipe_key ||
         a.board.version != 1)
         return false;
-    std::size_t size = header_size + 13;
+    std::size_t size = header_size + 13 + mark_items * 8;
     for (const auto *r : {&a.skater, &a.board}) {
         if (r->scalars.size() > max_cosmetic_scalars || r->items.empty() ||
             r->items.size() > max_cosmetic_slots)
@@ -445,7 +445,13 @@ std::vector<std::uint8_t> encode(const Packet &p, bool compact_pose, std::uint32
         w.integer(p.appearance.card.background, 4);
         w.integer(p.appearance.card.emblem, 4);
         w.integer(p.appearance.card.title, 4);
-        w.integer(p.appearance.unmarked ? 1 : 0, 1);
+        w.integer((p.appearance.hide_tag ? 1 : 0) | (p.appearance.hide_items ? 2 : 0), 1);
+        for (const auto &style : p.appearance.marks) {
+            w.integer(static_cast<std::uint8_t>(style.mode), 1);
+            for (const auto part : style.from) w.integer(part, 1);
+            for (const auto part : style.to) w.integer(part, 1);
+            w.integer(style.speed, 1);
+        }
     } else if (p.kind == PacketKind::audio) {
         w.integer(p.audio.size(), 2);
         AudioState previous;
@@ -676,8 +682,17 @@ std::optional<Packet> decode(std::span<const std::uint8_t> bytes) noexcept {
             p.appearance.card.emblem = static_cast<std::uint32_t>(r.integer(4));
             p.appearance.card.title = static_cast<std::uint32_t>(r.integer(4));
             const auto flags = r.integer(1);
-            p.appearance.unmarked = flags == 1;
-            if (flags > 1 || !p.map || !valid_appearance(p.appearance))
+            p.appearance.hide_tag = (flags & 1) != 0;
+            p.appearance.hide_items = (flags & 2) != 0;
+            bool styled = true;
+            for (auto &style : p.appearance.marks) {
+                style.mode = static_cast<MarkMode>(r.integer(1));
+                for (auto &part : style.from) part = static_cast<std::uint8_t>(r.integer(1));
+                for (auto &part : style.to) part = static_cast<std::uint8_t>(r.integer(1));
+                style.speed = static_cast<std::uint8_t>(r.integer(1));
+                styled = styled && valid_mark_style(style);
+            }
+            if (flags > 3 || !styled || !p.map || !valid_appearance(p.appearance))
                 return {};
         } else if (p.kind == PacketKind::audio) {
             const auto count = r.integer(2);
