@@ -712,7 +712,8 @@ void mod_overview(const Fonts& fonts, ModsPanel& panel, const thunderstore::Inst
         save(panel);
     }
     ImGui::SameLine(extent.x - S(28) - S(110));
-    if (ImGui::Button("CLOSE", ImVec2(S(110), 0))) close();
+    // Escape too, and so a controller's B: the modal has no other way out but CLOSE.
+    if (ImGui::Button("CLOSE", ImVec2(S(110), 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) close();
     ImGui::EndPopup();
 }
 
@@ -1033,10 +1034,12 @@ void mods_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, Ui& ui, Mo
     }
     ImGui::EndChild();
 
+    // Read before the overviews: one closing on Escape must not also leave the page.
+    const bool popup_open = ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId);
     if (panel.tab == 1) package_overview(fonts, panel, frame, installing);
     else mod_overview(fonts, panel, installed, frame, installing);
     if (leave) close();
-    if (!installing && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId) && !ImGui::IsAnyItemActive() &&
+    if (!installing && !popup_open && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId) && !ImGui::IsAnyItemActive() &&
         ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
         // Escape lets go of the ticked mods first, and leaves the page after that.
         if (panel.tab == 0 && !panel.marked.empty()) panel.marked.clear();
@@ -1072,7 +1075,11 @@ void mods_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, Ui& ui, Mo
         if (bytes) ImGui::TextDisabled("That frees %s.", size_text(bytes).c_str());
         ImGui::PopTextWrapPos();
         ImGui::Spacing();
-        if (ImGui::Button("Cancel", ImVec2(S(110), 0))) { panel.confirm_remove.clear(); ImGui::CloseCurrentPopup(); }
+        // Escape (and a controller's B) answers Cancel, never the destructive choice.
+        if (ImGui::Button("Cancel", ImVec2(S(110), 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+            panel.confirm_remove.clear();
+            ImGui::CloseCurrentPopup();
+        }
         ImGui::SameLine();
         push_primary_button();
         if (ImGui::Button("UNINSTALL", ImVec2(S(110), 0))) {
@@ -1117,7 +1124,7 @@ void mods_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, Ui& ui, Mo
             panel.conflict_name.c_str());
         ImGui::PopTextWrapPos();
         ImGui::Spacing();
-        if (ImGui::Button("Cancel", ImVec2(S(110), 0))) {
+        if (ImGui::Button("Cancel", ImVec2(S(110), 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
             panel.conflict_name.clear();
             ImGui::CloseCurrentPopup();
         }

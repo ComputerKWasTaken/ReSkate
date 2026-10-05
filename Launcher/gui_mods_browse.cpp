@@ -676,7 +676,8 @@ void package_overview(const Fonts& fonts, ModsPanel& panel, ImVec2 size, bool in
     if (ImGui::Checkbox("Install with the others I tick", &ticked)) pick(store, package.full_name, ticked);
     ImGui::EndDisabled();
     ImGui::SameLine(extent.x - S(28) - S(110));
-    if (ImGui::Button("CLOSE", ImVec2(S(110), 0))) close();
+    // Escape too, and so a controller's B: the modal has no other way out but CLOSE.
+    if (ImGui::Button("CLOSE", ImVec2(S(110), 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) close();
     ImGui::EndPopup();
 }
 

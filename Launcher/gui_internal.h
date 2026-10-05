@@ -1,5 +1,6 @@
 #pragma once
 
+#include "gamepad_input.h"
 #include "launch.h"
 #include "text_encoding.h"
 #include "thunderstore.h"
@@ -162,6 +163,11 @@ inline std::atomic<unsigned> g_captured_key{};
 // Paths dropped on the window, picked up by the next frame.
 inline std::mutex g_dropped_mutex;
 inline std::vector<fs::path> g_dropped;
+// Every connected controller merged into one: XInput pads (Xbox, and Steam
+// Input's virtual pad on a Steam Deck), else a DualShock 4 / DualSense over HID.
+PadState read_pad();
+// The window's controller input, told about mouse moves by the window procedure.
+inline PadFeed* g_pad_feed{};
 
 // ---------------------------------------------------------------- settings
 
