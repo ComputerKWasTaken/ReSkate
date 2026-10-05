@@ -3,6 +3,7 @@
 #include "Launcher/gamepad_input.h"
 
 #include <imgui.h>
+#include <imgui_internal.h>
 
 #include <iostream>
 #include <optional>
@@ -21,17 +22,18 @@ void check(bool condition, const char* what) {
     ++failures;
 }
 
-constexpr std::uint16_t dpad_down = 0x0002, right_thumb = 0x0080, button_a = 0x1000, button_b = 0x2000;
+constexpr std::uint16_t dpad_down = 0x0002, dpad_right = 0x0008, right_thumb = 0x0080, button_a = 0x1000, button_b = 0x2000;
 
 struct Seen {
     std::string pressed;   // the button that reported a press this frame
     bool escape{};
     bool menu_open{};
+    float list_scroll{};
 };
 
 // One launcher frame: the pad goes in before NewFrame, as gui.cpp does it.
 // Two buttons stacked at the top left, and a menu popup opened on request.
-Seen frame(PadFeed& feed, const PadState& pad, bool open_menu = false, bool panels = false) {
+Seen frame(PadFeed& feed, const PadState& pad, bool open_menu = false, bool panels = false, bool list = false) {
     auto& io = ImGui::GetIO();
     io.DisplaySize = ImVec2(800, 600);
     io.DeltaTime = 1.0f / 60.0f;
@@ -56,6 +58,18 @@ Seen frame(PadFeed& feed, const PadState& pad, bool open_menu = false, bool pane
         if (ImGui::Button("option", ImVec2(120, 40))) seen.pressed = "option";
         ImGui::EndChild();
     }
+    if (list) {
+        // A long list in a panel, like GET MODS.
+        ImGui::SetCursorScreenPos(ImVec2(400, 100));
+        ImGui::BeginChild("##list", ImVec2(300, 200), ImGuiChildFlags_NavFlattened);
+        for (int row = 0; row < 30; ++row) {
+            ImGui::PushID(row);
+            if (ImGui::Selectable("##row", false, 0, ImVec2(280, 40))) seen.pressed = "row " + std::to_string(row);
+            ImGui::PopID();
+        }
+        seen.list_scroll = ImGui::GetScrollY();
+        ImGui::EndChild();
+    }
     if (open_menu) ImGui::OpenPopup("##menu");
     if (ImGui::BeginPopup("##menu")) {
         seen.menu_open = true;
@@ -68,8 +82,9 @@ Seen frame(PadFeed& feed, const PadState& pad, bool open_menu = false, bool pane
     return seen;
 }
 
-PadState pad(std::uint16_t buttons = 0, std::int16_t right_x = 0, std::int16_t right_y = 0) {
+PadState pad(std::uint16_t buttons = 0, std::int16_t right_x = 0, std::int16_t right_y = 0, std::int16_t left_y = 0) {
     PadState state;
+    state.left_y = left_y;
     state.connected = true;
     state.buttons = buttons;
     state.right_x = right_x;
@@ -158,7 +173,6 @@ int main() {
     {
         fresh();
         PadFeed feed;
-        constexpr std::uint16_t dpad_right = 0x0008;
         for (int i = 0; i < 2; ++i) frame(feed, pad(), false, true);
         const auto tap = [&](std::uint16_t button) { frame(feed, pad(button), false, true); frame(feed, pad(), false, true); };
         tap(dpad_down);   // onto "first"
@@ -169,6 +183,48 @@ int main() {
         const auto released = frame(feed, pad(), false, true).pressed;
         check((pressed.empty() ? released : pressed) == "option",
               "The D-pad crosses from a page's rail into its content");
+    }
+
+    // ------------------------------------------------ scrolling
+    {
+        fresh();
+        PadFeed feed;
+        const auto tap = [&](std::uint16_t button) { frame(feed, pad(button), false, false, true); frame(feed, pad(), false, false, true); };
+        for (int i = 0; i < 2; ++i) frame(feed, pad(), false, false, true);
+        tap(dpad_right);   // from nothing onto the list's first row
+        tap(dpad_right);
+        float scroll{};
+        for (int i = 0; i < 30; ++i) scroll = frame(feed, pad(0, 0, 0, -32767), false, false, true).list_scroll;
+        scroll = frame(feed, pad(), false, false, true).list_scroll;
+        check(scroll > 100, "The left stick scrolls the panel holding the focus");
+        check(!feed.pointing() && GImGui->NavCursorVisible && GImGui->NavHighlightItemUnderNav,
+              "Scrolling stays with the focus, not the mouse");
+        for (int i = 0; i < 60; ++i) frame(feed, pad(0, 0, 0, 32767), false, false, true);
+        check(frame(feed, pad(), false, false, true).list_scroll == 0, "Pushing up scrolls back to the top");
+    }
+    {
+        fresh();
+        PadFeed feed;
+        ImGui::GetIO().AddMousePosEvent(500, 200);   // over the list
+        for (int i = 0; i < 2; ++i) frame(feed, pad(), false, false, true);
+        frame(feed, pad(0, 0, 0, 0), false, false, true);
+        frame(feed, pad(right_thumb), false, false, true);   // the pointer shows, without a click
+        frame(feed, pad(), false, false, true);
+        float scroll{};
+        for (int i = 0; i < 30; ++i) scroll = frame(feed, pad(0, 0, 0, -32767), false, false, true).list_scroll;
+        scroll = frame(feed, pad(), false, false, true).list_scroll;
+        check(scroll > 100, "The left stick scrolls the panel under the pointer");
+        check(feed.pointing(), "Scrolling keeps the pointer");
+    }
+    {
+        fresh();
+        PadFeed feed;
+        ImGui::GetIO().AddMousePosEvent(500, 200);   // the mouse resting over the list
+        for (int i = 0; i < 2; ++i) frame(feed, pad(), false, false, true);
+        float scroll{};
+        for (int i = 0; i < 30; ++i) scroll = frame(feed, pad(0, 0, 0, -32767), false, false, true).list_scroll;
+        scroll = frame(feed, pad(), false, false, true).list_scroll;
+        check(scroll > 100, "The left stick scrolls the panel under the mouse");
     }
 
     // ------------------------------------------------ trackpad pointer

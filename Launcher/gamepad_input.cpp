@@ -29,15 +29,32 @@ constexpr float left_dead_zone = 7849.0f / 32767.0f;
 constexpr float right_dead_zone = 0.2f;
 // Pointer speed at full tilt, in design pixels a second.
 constexpr float pointer_speed = 1400.0f;
+// Scrolling at full tilt: design pixels a second for the focused panel, and
+// mouse wheel notches a second (ImGui scrolls five lines a notch) under a pointer.
+constexpr float scroll_speed = 1200.0f;
+constexpr float wheel_speed = 16.0f;
 // A mouse move this close to the last one is the same place reported again.
 constexpr float pointer_slack = 2.0f;
 
 float axis(std::int16_t value) { return std::clamp(static_cast<float>(value) / 32767.0f, -1.0f, 1.0f); }
 
-void stick(ImGuiIO& io, ImGuiKey negative, ImGuiKey positive, float value) {
-    const auto amount = [](float tilt) { return std::clamp((tilt - left_dead_zone) / (1 - left_dead_zone), 0.0f, 1.0f); };
-    io.AddKeyAnalogEvent(negative, -value > left_dead_zone, amount(-value));
-    io.AddKeyAnalogEvent(positive, value > left_dead_zone, amount(value));
+// The left stick scrolls whatever the user is looking at: the panel holding
+// the pad's focus while the focus is shown, else the one under the pointer.
+// ImGui's own stick scrolling only ever moves the focused window, which under a
+// pointer is usually the page itself, with nothing to scroll.
+void scroll(ImGuiIO& io, float tilt, float scale) {
+    const float amount = std::copysign(std::clamp((std::abs(tilt) - left_dead_zone) / (1 - left_dead_zone), 0.0f, 1.0f), tilt);
+    if (amount == 0.0f) return;
+    const ImGuiContext& g = *GImGui;
+    if (g.NavCursorVisible && g.NavHighlightItemUnderNav) {
+        // The nearest panel around the focus that can scroll.
+        ImGuiWindow* window = g.NavWindow;
+        while (window && window->ScrollMax.y <= 0 && (window->Flags & ImGuiWindowFlags_ChildWindow)) window = window->ParentWindow;
+        if (window && window->ScrollMax.y > 0)
+            ImGui::SetScrollY(window, window->Scroll.y - amount * scroll_speed * scale * io.DeltaTime);
+        return;
+    }
+    io.AddMouseWheelEvent(0, amount * wheel_speed * io.DeltaTime);
 }
 
 // B goes to ImGui's own cancel while ImGui has something to cancel: a combo or
@@ -75,19 +92,12 @@ void PadFeed::update(ImGuiIO& io, const PadState& input, float scale) {
         if (down) back_key_ = imgui_cancels() ? ImGuiKey_GamepadFaceRight : ImGuiKey_Escape;
         io.AddKeyEvent(back_key_, down);
     }
-    const float left_x = axis(pad.left_x), left_y = axis(pad.left_y);
-    if (pad.connected || connected_) {
-        // Analog values ImGui already has are dropped by ImGui itself.
-        stick(io, ImGuiKey_GamepadLStickLeft, ImGuiKey_GamepadLStickRight, left_x);
-        stick(io, ImGuiKey_GamepadLStickDown, ImGuiKey_GamepadLStickUp, left_y);
-    }
-    connected_ = pad.connected;
+    scroll(io, axis(pad.left_y), scale);
     buttons_ = pad.buttons;
 
     // Moving the focus hands the screen back to it: ImGui hides the focus while
-    // a pointer moves, so the pointer goes away instead.
-    if ((pressed & focus_bits) || std::abs(left_x) > left_dead_zone || std::abs(left_y) > left_dead_zone)
-        pointing_ = false;
+    // a pointer moves, so the pointer goes away instead. Scrolling keeps both.
+    if (pressed & focus_bits) pointing_ = false;
 
     const float x = axis(pad.right_x), y = -axis(pad.right_y);   // screen Y grows downward
     const float tilt = std::min(1.0f, std::sqrt(x * x + y * y));

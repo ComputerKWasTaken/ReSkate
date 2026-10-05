@@ -19,7 +19,8 @@ struct PadState {
 };
 
 // Turns a pad into the launcher's ImGui input:
-// - D-pad and left stick move the focus, A (Cross) presses the focused item;
+// - the D-pad moves the focus, A (Cross) presses the focused item;
+// - the left stick scrolls, under the focus or under the pointer;
 // - B (Circle) closes an open combo or menu and leaves a text field, and is
 //   Escape otherwise, which the launcher's pages and modals already go back on;
 // - the right stick moves a pointer and R3 clicks with it. Under Steam Input's
@@ -41,7 +42,6 @@ public:
 private:
     std::uint16_t buttons_{};
     ImGuiKey back_key_{ImGuiKey_Escape};
-    bool connected_{};
     bool pointing_{};
     bool clicking_{};   // R3 holds the left button
     ImVec2 pointer_{};
