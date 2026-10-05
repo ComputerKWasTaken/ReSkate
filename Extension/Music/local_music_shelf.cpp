@@ -1,4 +1,5 @@
 #include "Extension/Music/local_music_shelf.h"
+#include "Extension/Music/local_music_assets.h"
 #include "Engine/Core/Log/logging.h"
 #include "Engine/Game/Abi/native_data.h"
 #include "Engine/Game/Build/addresses.h"
@@ -198,22 +199,39 @@ std::uint64_t music_model_construct_hook(std::uintptr_t manager, std::uint8_t mo
     try {
         if (!handle || !type || md::read<std::uint32_t>(md::read<std::uintptr_t>(type)) != 0x48455d84U)
             return handle;
-        game::ModelWriteLock lock(manager);
-        md::Context context{local_runtime().base, manager};
-        const auto items = context.field(md::Value{handle, type}, 0x67223da7U);
-        unsigned count{}, stride{};
-        const auto bytes = context.array(items, 1024, count, stride);
-        if (count != 3 || stride != 16) return handle;
-        constexpr const char* records[] = {
-            "MusicPlaylistManager_Base_ContentResources/Featured_AnchoredContent_VM",
-            "MusicPlaylistManager_Base_ContentResources/Liked_AnchoredContent_VM",
-            "MusicPlaylistManager_Base_ContentResources/NewlyDiscovered_AnchoredContent_VM"};
-        for (unsigned item = 0; item < 3; ++item) {
-            std::uintptr_t item_record{};
-            std::memcpy(&item_record, bytes.data() + item * stride, sizeof(item_record));
-            // Named record header +0x28 is also used by the native UI dumper.
-            if (!item_record || md::string(md::read<std::uintptr_t>(item_record + 0x28), 256) != records[item])
-                return handle;
+        bool is_music_shelf = false;
+        {
+            game::ModelWriteLock lock(manager);
+            md::Context context{local_runtime().base, manager};
+            const auto items = context.field(md::Value{handle, type}, 0x67223da7U);
+            unsigned count{}, stride{};
+            const auto bytes = context.array(items, 1024, count, stride);
+            if (count != 3 || stride != 16) return handle;
+            constexpr const char* records[] = {
+                "MusicPlaylistManager_Base_ContentResources/Featured_AnchoredContent_VM",
+                "MusicPlaylistManager_Base_ContentResources/Liked_AnchoredContent_VM",
+                "MusicPlaylistManager_Base_ContentResources/NewlyDiscovered_AnchoredContent_VM"};
+            is_music_shelf = true;
+            for (unsigned item = 0; item < 3; ++item) {
+                std::uintptr_t item_record{};
+                std::memcpy(&item_record, bytes.data() + item * stride, sizeof(item_record));
+                // Named record header +0x28 is also used by the native UI dumper.
+                if (!item_record || md::string(md::read<std::uintptr_t>(item_record + 0x28), 256) != records[item]) {
+                    is_music_shelf = false;
+                    break;
+                }
+            }
+        }
+        if (!is_music_shelf) return handle;
+        // Only add our shelf when an enabled mod actually declares a playlist with songs. Otherwise
+        // leave the native three shelves untouched instead of publishing an empty Mods shelf.
+        bool has_mod_playlists = false;
+        for (const auto& playlist : mod_music_playlists())
+            if (!playlist.songs.empty()) { has_mod_playlists = true; break; }
+        if (!has_mod_playlists) {
+            mods_shelf = {};
+            dingosdk::logging::event(dingosdk::logging::Channel::music, "{\"event\":\"music_mods_shelf_skipped\"}");
+            return handle;
         }
         const auto report = music_shelf_append_one(local_runtime().base, manager, handle);
         dingosdk::logging::event(dingosdk::logging::Channel::music,

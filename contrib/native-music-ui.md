@@ -198,6 +198,12 @@ The Mods implementation performs these steps under the native model write lock:
    **Mods, Featured, Liked, Newly Discovered**.
 7. Populate the owned tile list from mod playlist rows in Featured.
 
+The shelf is only built when an enabled mod declares a playlist with songs, read from
+each mod's `reskate-music.json`. The insertion has to happen before the widgets bind,
+so its rows cannot be awaited; the enabled mods' declarations are the signal that does
+not depend on row hydration. With none, the native three shelves are left untouched
+rather than publishing an empty Mods shelf.
+
 The native template supplies layout and presentation defaults. Creating both
 models separately supplies independent state. Changing the label on the original
 Liked tile list would rename the original shelf too.
