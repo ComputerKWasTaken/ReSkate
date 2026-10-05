@@ -12,6 +12,13 @@
 #include "Extension/Profile/runtime_internal.h"
 
 namespace dingosdk::profile_runtime {
+namespace {
+std::string music_artwork_url(std::string_view value) {
+    // Only URLs produced by the local artwork server bypass CDN resolution.
+    if (value.starts_with("http://127.0.0.1:")) return std::string(value);
+    return travel_artwork_url(value);
+}
+}
 // Runtime-only music UI hydration: read_music_catalog copies actual registered
 
 // MusicGraphAsset metadata/TagRefs. No generated catalog, guessed memberships,
@@ -117,14 +124,14 @@ std::string music_ui_wire(std::string_view id, std::string_view artist, std::str
         // The catalogue's display name when known; the raw id otherwise.
         cosmetic_wire_string(presentation, 10, name.empty() ? id : name);
         // Artwork: the catalogue's cdn:/ id, resolved to the CDN rendition.
-        if (const auto url = travel_artwork_url(artwork); !url.empty())
+        if (const auto url = music_artwork_url(artwork); !url.empty())
             cosmetic_wire_string(presentation, 11, url);
         cosmetic_wire_number(presentation, 12, 0);
     } else {
         cosmetic_wire_string(presentation, 10, artist);
         cosmetic_wire_string(presentation, 11, title);
         // Cover art: the content cache song record's cdn:/ id (its field 10.12), resolved like a playlist's.
-        if (const auto url = travel_artwork_url(artwork); !url.empty())
+        if (const auto url = music_artwork_url(artwork); !url.empty())
             cosmetic_wire_string(presentation, 12, url);
     }
     cosmetic_wire_string(body, 10, presentation);
