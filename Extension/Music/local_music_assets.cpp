@@ -198,11 +198,13 @@ bool read_music_catalog(MusicCatalog& result) {
     }
     // Registry order is bucket order, not authored ordering. Use stable IDs for
     // deterministic UI order; do not claim this is the original service order.
+    // Authored mod playlists keep their defined track positioning.
     std::sort(snapshot.songs.begin(), snapshot.songs.end(), [](const auto& a, const auto& b) {
         return a.id < b.id;
     });
     for (auto& [id, songs] : playlists) {
-        std::sort(songs.begin(), songs.end());
+        if (!id.starts_with("mod:"))
+            std::sort(songs.begin(), songs.end());
         MusicPlaylist row;
         row.id = id;
         row.songs = std::move(songs);
