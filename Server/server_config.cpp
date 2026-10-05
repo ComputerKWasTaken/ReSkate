@@ -118,7 +118,7 @@ ServerConfig load_config(const std::filesystem::path &file, std::vector<std::str
     if (root.contains("map_pool") && root.at("map_pool").is_array())
         for (const auto &map : root.at("map_pool"))
             if (map.is_string() && !map.string().empty()) c.map_pool.push_back(map.string());
-    c.map_rotation = std::min(root.value("map_rotation_minutes", c.map_rotation), 1440U);
+    c.map_rotation = std::min(root.value("map_rotation_minutes", c.map_rotation), max_map_rotation);
     c.max_players = root.value("max_players", c.max_players);
     c.password = root.value("password", c.password);
     c.welcome = root.value("welcome", c.welcome);

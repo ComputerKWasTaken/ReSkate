@@ -323,15 +323,22 @@ void Host::send_bans(Guest &admin) {
     }
     if (send_packet(admin, list, true, false)) admin.bans_sent = bans_revision_;
 }
-void Host::send_maps(Guest &guest) { // admins: every map; players: the pool
+void Host::send_maps(Guest &guest) { // admins: every map and the pool; players: the pool
     auto list = packet(PacketKind::maps, now_);
     const auto add = [&](const ServerLevel &level) {
         if (valid_map_asset(level.asset) && list.maps.size() < max_server_maps) list.maps.push_back(level.asset);
     };
-    if (is_admin(guest.member.id))
+    if (is_admin(guest.member.id)) {
         for (const auto &level : levels()) add(level);
-    else
+        if (!config_.map_pool.empty())
+            for (const auto *level : pool_levels(config_)) {
+                const auto at = std::find(list.maps.begin(), list.maps.end(), level->asset);
+                if (at != list.maps.end()) list.map_pool.push_back(static_cast<std::uint16_t>(at - list.maps.begin()));
+            }
+    } else {
         for (const auto *level : pool_levels(config_)) add(*level);
+    }
+    list.map_rotation = static_cast<std::uint16_t>(std::min(config_.map_rotation, max_map_rotation));
     if (send_packet(guest, list, true, false)) guest.maps_sent = true;
 }
 void Host::change_map(std::string_view map) {
@@ -960,7 +967,7 @@ std::string Host::command(std::string_view line, std::uint64_t admin) {
         if (argument.empty()) return rotation_text();
         const auto value = lower(argument);
         const auto minutes = value == "off" ? std::optional<std::uint64_t>(0) : number(value);
-        if (!minutes || *minutes > 1440) return "rotation <1-1440 minutes>|off";
+        if (!minutes || *minutes > max_map_rotation) return "rotation <1-1440 minutes>|off";
         config_.map_rotation = static_cast<unsigned>(*minutes);
         map_since_ = now_;
         rotation_warned_ = false;

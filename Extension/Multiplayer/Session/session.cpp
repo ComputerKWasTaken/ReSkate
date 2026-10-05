@@ -75,6 +75,8 @@ void stop(Session &s, std::string reason) {
     s.server_bans.clear();
     s.server_ban_total = 0;
     s.server_maps.clear();
+    s.server_map_pool.clear();
+    s.server_map_rotation = 0;
     set_lobby_object_placement_allowed(true);
     s.guest_noclip = s.guest_no_bail = s.guest_boosts = true;
     s.enforce_tuning = true;

@@ -682,6 +682,9 @@ void networking(Session &s, const NativeFrame &local, std::uint64_t now) {
         if (p.kind == PacketKind::maps) {
             if (dedicated_host(s) && message.peer == s.host_id && p.source == s.host_id) {
                 s.server_maps = p.maps;
+                s.server_map_pool.clear();
+                for (const auto entry : p.map_pool) s.server_map_pool.push_back(p.maps[entry]);
+                s.server_map_rotation = p.map_rotation;
                 publish(s);
                 publish_chat(s);
             }

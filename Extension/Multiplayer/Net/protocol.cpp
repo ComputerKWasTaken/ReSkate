@@ -356,7 +356,8 @@ std::vector<std::uint8_t> encode(const Packet &p, bool compact_pose, std::uint32
          })))
         throw std::invalid_argument("Invalid ban list");
     if (p.kind == PacketKind::maps &&
-        (!p.source || p.maps.size() > max_server_maps ||
+        (!p.source || p.maps.size() > max_server_maps || !valid_map_pool(p.map_pool, p.maps.size()) ||
+         p.map_rotation > max_map_rotation ||
          std::any_of(p.maps.begin(), p.maps.end(), [](const auto &asset) { return !valid_map_asset(asset); })))
         throw std::invalid_argument("Invalid server map list");
     if (p.kind == PacketKind::hello && !p.text.empty() && !valid_member_name(p.text))
@@ -515,6 +516,9 @@ std::vector<std::uint8_t> encode(const Packet &p, bool compact_pose, std::uint32
             w.integer(asset.size(), 1);
             w.bytes.insert(w.bytes.end(), asset.begin(), asset.end());
         }
+        w.integer(p.map_pool.size(), 2);
+        for (const auto index : p.map_pool) w.integer(index, 2);
+        w.integer(p.map_rotation, 2);
     }
     if (p.kind == PacketKind::bans) {
         w.integer(p.ban_total, 4);
@@ -789,6 +793,11 @@ std::optional<Packet> decode(std::span<const std::uint8_t> bytes) noexcept {
                 if (!valid_map_asset(asset)) return {};
                 p.maps.push_back(std::move(asset));
             }
+            const auto pooled = r.integer(2);
+            if (pooled > p.maps.size()) return {};
+            for (std::uint64_t i = 0; i < pooled; ++i) p.map_pool.push_back(static_cast<std::uint16_t>(r.integer(2)));
+            p.map_rotation = static_cast<std::uint16_t>(r.integer(2));
+            if (!valid_map_pool(p.map_pool, p.maps.size()) || p.map_rotation > max_map_rotation) return {};
         } else if (p.kind == PacketKind::bans) {
             p.ban_total = static_cast<std::uint32_t>(r.integer(4));
             const auto count = r.integer(2);
@@ -957,6 +966,12 @@ bool valid_member_name(std::string_view text) noexcept {
 bool valid_map_asset(std::string_view asset) noexcept {
     return !asset.empty() && asset.size() <= max_map_asset &&
            std::all_of(asset.begin(), asset.end(), [](char c) { return c > 32 && c < 127 && c != '|'; });
+}
+bool valid_map_pool(std::span<const std::uint16_t> pool, std::size_t maps) noexcept {
+    if (pool.size() > maps) return false;
+    for (std::size_t i = 0; i < pool.size(); ++i)
+        if (pool[i] >= maps || std::find(pool.begin(), pool.begin() + i, pool[i]) != pool.begin() + i) return false;
+    return true;
 }
 bool valid_admin_text(std::string_view text) noexcept {
     if (text.empty() || text.size() > max_admin_text) return false;
