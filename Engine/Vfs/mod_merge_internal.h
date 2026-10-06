@@ -80,8 +80,11 @@ struct PlacementRecord {
 PlacementRecord read_placements(const fs::path& file);
 void write_placements(const fs::path& file, const PlacementRecord& record);
 
+// `storeKnown`: the content cache that says what the game's store sells is
+// installed, so the mods were checked for copies of store items; a patch built
+// without it is built again once it is there.
 std::string merge_fingerprint(const Catalog& catalog, const std::vector<const Mod*>& mods,
-                              const std::map<const Mod*, RelativeFiles>& modFiles);
+                              const std::map<const Mod*, RelativeFiles>& modFiles, bool storeKnown);
 inline constexpr wchar_t stamp_file[] = L"reskate-merge.stamp";
 std::optional<MergeReport> previous_merge(const fs::path& output, const std::string& fingerprint);
 void write_stamp(const fs::path& output, const std::string& fingerprint, const MergeReport& report);
@@ -177,13 +180,19 @@ struct AssetOverride {
     // Present for a Lua resource replacement: its identity and metadata must
     // travel with the script bytes, including source and bytecode sizes.
     std::optional<fb::BundleAsset> resource;
+    // The documents the changed EBX refers to that its mod added to the bundle it
+    // made the change in, by their guids. They go wherever the change goes: the
+    // game keeps a list in more bundles than one, each with what the list names.
+    std::set<fb::Guid> names;
 };
 inline constexpr std::uint32_t luaScriptResourceType = 0xEC383B87;
 // An EBX asset a mod added to one of the game's bundles, or a resource it added
 // under the same name as such an asset (a wave's sound-bank). Maps carry their own
 // copy of a bundle like bam_coregameassets, and that copy loads instead of the
 // game's on their levels; an edit to a list there (the master music playlist)
-// propagates as a change, so the asset it now names has to come along too.
+// propagates as a change, so the asset it now names has to come along too. The
+// game also keeps such a list in more bundles than the one the mod put its
+// assets in, and a copy of any of those takes the change the same way.
 struct AssetAddition {
     std::string mod;
     fb::BundleAsset asset;
@@ -192,6 +201,10 @@ struct AssetAddition {
     // bundle in that same TOC merges with the mod's own bundle and already has the asset;
     // only copies in other superbundles (a map's level TOC) need it carried.
     std::string toc;
+    // For an EBX: its document's guid, which is what a list names it by, and the
+    // guids of the documents it refers to in turn (a song names its wave).
+    fb::Guid file;
+    std::vector<fb::Guid> names;
 };
 struct AssetOverrides {
     // By lower-case asset name, then the game's sha1 the change replaces.
@@ -216,6 +229,40 @@ AssetOverrides collect_asset_overrides(const std::vector<const Mod*>& mods,
                                        const std::map<const Mod*, RelativeFiles>& modFiles,
                                        const CasStore& store, const fs::path& baseRoot,
                                        const fs::path& gameRoot, MergeReport& report);
+
+// A bundle's chunk metadata is a list with one record for each of its chunks: the
+// hash of the name of the resource the chunk belongs to ("h64") and what the
+// engine needs before it streams the chunk (a texture's first mip). In the game's
+// own bundles the records are in the order of the chunks' guids, not the order
+// the chunks are listed in. A mod's copy starts from the game's list as it is and
+// has, at the place each chunk it adds or replaces is listed at, a record its
+// tool wrote: for an added chunk that is the chunk's own record, but for a
+// replaced one it has taken the place of another chunk's (and older tools left
+// its hash empty), so the game's record for that other chunk is gone from the
+// mod's list.
+struct ChunkRecord {
+    static constexpr std::size_t none = static_cast<std::size_t>(-1);
+    fb::Guid guid;
+    std::size_t copy{none};     // the list of the copy this version of the chunk came in; none when that copy has no list
+    std::size_t index{};        // where that copy lists the chunk
+    std::size_t shipped{none};  // where the game's copy lists it; none for a chunk mods add
+};
+// The list for a merged bundle, written as the game writes one: a record for each
+// of `chunks` (the bundle's chunks, as listed), in the order of their guids. A
+// chunk of the game's keeps the game's record for it, whichever copy carries it
+// (`game` is the game's list among `lists`, `shipped` the chunks the game's copy
+// lists); when the kept version is one a mod replaced it with, the first mip that
+// mod's record gives goes into it. A chunk a mod adds has that mod's record, and
+// one nothing describes gets a record that says nothing. In a bundle the game
+// does not ship, or ships without a list, every chunk is one a mod adds. When
+// every chunk is the game's own where the game lists it, the game's list comes
+// back as it is; so does one mod's, for a bundle without a list in the game that
+// is that mod's copy alone.
+// Throws when a list that is needed cannot be read.
+[[nodiscard]] std::vector<std::byte> merge_chunk_metadata(std::span<const std::vector<std::byte>> lists,
+                                                          std::span<const ChunkRecord> chunks,
+                                                          std::size_t game = ChunkRecord::none,
+                                                          std::span<const fb::Guid> shipped = {});
 
 fb::TocDocument combine(const fs::path& baseToc, const fs::path& baseRoot,
                         std::vector<Source>& sources, MergeReport& report,

@@ -176,7 +176,8 @@ void publish(Session &s, const NativeFrame *local) {
         if (const auto mark = identity_mark(social->local.id)) {
             std::tie(view.identity_tag_colour, view.identity_tag) = mark_role(*mark);
             view.identity_animation =
-                *mark == IdentityList::developer ? "RAINBOW" : *mark == IdentityList::content_creator ? "RED" : "GOLD";
+                *mark == IdentityList::developer ? "RAINBOW" : *mark == IdentityList::content_creator ? "RED" :
+                *mark == IdentityList::centrix ? "BLUE" : "GOLD";
             const auto styles = developer_hoodie_detail::own_styles.load();
             const auto standard = developer_hoodie_detail::standard_picks(*mark);
             view.identity_styles.resize(styles.size());
@@ -214,9 +215,17 @@ void publish(Session &s, const NativeFrame *local) {
         view.server_bans = true;
         view.server_ban_total = s.server_ban_total;
         view.server_maps = s.server_maps;
+        view.server_map_pool = s.server_map_pool;
+        view.server_map_rotation = s.server_map_rotation;
+        view.server_map_votes = (s.server_votes & server_vote_map) != 0;
     }
     view.chat_visible = s.chat_visible;
     view.chat_filter = s.chat_filter;
+    view.chat_bubbles = s.chat_bubbles;
+    view.chat_bubbles_own = s.chat_bubbles_own;
+    view.chat_bubbles_distance = s.chat_bubbles_distance;
+    view.chat_bubbles_duration = s.chat_bubbles_duration;
+    view.chat_bubbles_history = s.chat_bubbles_history;
     view.object_status = network_object_status();
     view.players = static_cast<int>(player_count(s));
     view.sent = t.sent;
@@ -447,6 +456,8 @@ std::vector<MultiplayerChatCommand> chat_commands(const Session &s) {
             list.push_back({"/tod", "/tod <time>", "Admin: set the time of day", "time"});
             list.push_back({"/votes", "/votes [map|kick|tod on|off|<percent>]", "Admin: the server's vote settings"});
             list.push_back({"/vote-cancel", "/vote-cancel", "Admin: stop the running vote"});
+            list.push_back({"/map-pool", "/map-pool [add|remove <map>|clear]", "Admin: the maps players vote between and the rotation uses"});
+            list.push_back({"/rotation", "/rotation [<minutes>|off]", "Admin: change the map on a timer, through the map pool"});
         }
     }
     return list;
@@ -518,7 +529,7 @@ void publish_chat(Session &s) {
             auto [found, added] = s.chat_masked.try_emplace(line.sequence);
             if (added) found->second = {text::mask_bad_words(line.name), text::mask_bad_words(line.text)};
             line.name = found->second.first;
-            line.text = found->second.second;
+            if (found->second.second != line.text) line.unmasked = std::exchange(line.text, found->second.second);
         }
     }
     std::lock_guard lock(s.mutex);
@@ -528,11 +539,14 @@ std::pair<std::uint32_t, std::string> mark_role(IdentityList list) {
     switch (list) {
     case IdentityList::developer: return {nametag_developer, "Dev"};
     case IdentityList::content_creator: return {nametag_creator, "Creator"};
+    case IdentityList::centrix: return {nametag_centrix, "Centrix"};
     default: return {nametag_homie, "Homie"};
     }
 }
-// The colour and tag a player gets, in chat and on their nametag.
-std::pair<std::uint32_t, std::string> player_role(Session &s, std::uint64_t sender, bool local) {
+// The colour and tag a player gets, in chat and on their nametag. `marks` off leaves out who
+// the backend says they are: for a chat line that is not known to be theirs (chat proofs,
+// session_receive.cpp).
+std::pair<std::uint32_t, std::string> player_role(Session &s, std::uint64_t sender, bool local, bool marks) {
     if (!sender) return {};
     const bool dedicated = dedicated_host(s);
     if (dedicated && sender == s.host_id) return {nametag_admin, {}}; // the server itself
@@ -540,7 +554,7 @@ std::pair<std::uint32_t, std::string> player_role(Session &s, std::uint64_t send
     const bool vouched = local || (peer && steam_vouched(s, *peer));
     // Who the backend says a player is comes before what they are in this lobby, unless they
     // have turned their tag off (the Special page), which their appearance tells everyone.
-    if (vouched && (local ? own_tag_shown() : shows_tag(*peer)))
+    if (marks && vouched && (local ? own_tag_shown() : shows_tag(*peer)))
         if (const auto mark = identity_mark(sender)) return mark_role(*mark);
     if (dedicated && (local ? s.server_admin : peer && peer->member.admin)) return {nametag_admin, "Admin"};
     if (!dedicated && (local ? s.mode == Mode::host : sender == s.host_id)) return {nametag_host, "Host"};
@@ -550,10 +564,10 @@ std::pair<std::uint32_t, std::string> player_role(Session &s, std::uint64_t send
     }
     return {nametag_white, {}};
 }
-void add_chat(Session &s, std::uint64_t sender, std::string name, std::string text, bool local) {
+void add_chat(Session &s, std::uint64_t sender, std::string name, std::string text, bool local, bool marks) {
     if (name.empty()) name = sender ? "Player" : "ReSkate";
-    auto [color, tag] = player_role(s, sender, local);
-    s.chat.push_back({++s.chat_sequence, sender, std::move(name), std::move(text), local, color, std::move(tag)});
+    auto [color, tag] = player_role(s, sender, local, marks);
+    s.chat.push_back({++s.chat_sequence, sender, now_us(), std::move(name), std::move(text), local, color, std::move(tag)});
     while (s.chat.size() > multiplayer_chat_history) s.chat.pop_front();
     publish_chat(s);
 }
