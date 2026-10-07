@@ -263,8 +263,8 @@ std::string config_error(const ServerConfig &c) {
                std::to_string(max_crowd_budget) + ".";
     if (c.steam_token.size() > 64 || !std::all_of(c.steam_token.begin(), c.steam_token.end(), [](unsigned char ch) { return std::isalnum(ch); }))
         return "steam_token must be a game server login token (letters and digits), or empty to sign in anonymously.";
-    if (c.map.empty() || !valid_map_destination(map_destination(c.map)))
-        return "map \"" + c.map + "\" is not a known map. Use a name like \"San Vansterdam\", or put the map's mod "
+    if (c.map.empty() || !valid_map_destination(map_destination(c.map)) || !installed_map(c.map))
+        return "map \"" + c.map + "\" is not a map this server has. Use a name like \"San Vansterdam\", or put the map's mod "
                "folder in Mods next to the server.";
     for (const auto &map : c.map_pool)
         if (!find_level(map) || !valid_map_destination(map_destination(map)))
@@ -355,6 +355,11 @@ const ServerLevel *find_level(std::string_view map) {
         if (result) return result;
     }
     return nullptr;
+}
+bool installed_map(std::string_view map) {
+    const auto destination = map_destination(map);
+    const auto asset = world_destination_asset(destination);
+    return !asset.empty() && std::any_of(level_list().begin(), level_list().end(), [&](const auto &level) { return same(level.asset, asset); });
 }
 std::string map_destination(std::string_view map) {
     if (map.find('|') != std::string_view::npos) return std::string(map);

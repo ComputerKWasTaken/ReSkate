@@ -159,6 +159,14 @@ int run() {
     check(edges.port == 65535 && edges.query_port == 1, "Ports at the ends of the range refused");
 
     static_cast<void>(load_levels(folder / "Mods")); // no Mods folder: the retail maps only
+    {
+        // Only maps the server has: the game's own always, a custom one once its mod is in Mods.
+        ServerConfig elsewhere;
+        elsewhere.map = "Levels/Game/NotHere/NotHere";
+        check(config_error(elsewhere).find("not a map this server has") != std::string::npos && !installed_map(elsewhere.map),
+              "A map the server does not have was accepted");
+        check(installed_map("Isle of Grom") && installed_map("Levels/Game/DingoLevel_MPR/DingoLevel_MPR"), "One of the game's own maps was refused");
+    }
     ServerConfig pool;
     check(pool_levels(pool).size() == levels().size() && in_map_pool(pool, "Stadium 2"),
           "An empty pool does not allow every map");

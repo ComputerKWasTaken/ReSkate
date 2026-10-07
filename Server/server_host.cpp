@@ -459,6 +459,7 @@ void Host::send_maps(Guest &guest) { // admins: every map and the pool; players:
 void Host::change_map(std::string_view map) {
     if (!valid_map_destination(map_destination(map_setting(map))))
         throw std::invalid_argument("That map does not name a destination.");
+    if (!installed_map(map)) throw std::invalid_argument("This server does not have that map.");
     // Everything tied to the old world goes; admission and player slots stay.
     for (auto &[id, guest] : guests_) {
         auto &g = *guest;
@@ -1303,6 +1304,9 @@ std::string Host::command(std::string_view line, std::uint64_t admin) {
         if (argument.empty() || !valid_map_destination(map_destination(argument)) ||
             !valid_map_destination(map_destination(map_setting(argument))))
             return "No single map is called \"" + std::string(argument) + "\". Type maps for the list.";
+        // Only a map the server has: the game's own, or one from a mod in its Mods folder.
+        if (!installed_map(argument))
+            return "This server does not have that map. Put the map's mod folder in Mods next to the server, then restart it.";
         if (map_hash(map_destination(argument)) == map_) return "The server is already on that map.";
         change_map(argument);
         save();

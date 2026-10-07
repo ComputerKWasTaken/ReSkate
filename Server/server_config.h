@@ -118,6 +118,9 @@ std::vector<std::string> load_levels(const std::filesystem::path &mods);
 const std::vector<ServerLevel> &levels();
 // Like the game's `load`: a level path, a name or short name, or the unique start of one.
 const ServerLevel *find_level(std::string_view map);
+// Whether the server has this map (a name, level path or destination): one of the game's own,
+// or one a mod folder in its Mods lists. It only moves players to a map it has itself.
+bool installed_map(std::string_view map);
 // What players load for a map, as the protocol carries it ("<root>|<level>").
 // Empty when the map is unknown (a full level path is always accepted).
 std::string map_destination(std::string_view map);
