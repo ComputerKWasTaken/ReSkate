@@ -4,6 +4,7 @@
 
 #include "Engine/Core/Log/logging.h"
 
+#include <cstring>
 #include <shobjidl.h>
 #include <wrl/client.h>
 
@@ -116,6 +117,33 @@ std::string summary(const ModsPanel& panel, const mods::Mod& mod) {
 
 // The rail: the two pages, then what you can do to the Mods folder. Returns
 // true when BACK was pressed.
+// The way to Thunderstore, in Thunderstore's colours: its mark and green on its dark blue, and
+// taller than the plain buttons beside it.
+bool thunderstore_button(const Fonts& fonts, const char* label, float height) {
+    const ImVec2 position = ImGui::GetCursorScreenPos(), size(ImGui::GetContentRegionAvail().x, height);
+    const bool pressed = ImGui::InvisibleButton(label, size);
+    const bool hovered = ImGui::IsItemHovered();
+    if (hovered) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+    auto* draw = ImGui::GetWindowDrawList();
+    const ImVec2 end(position.x + size.x, position.y + size.y);
+    draw->AddRectFilled(position, end, hovered ? rgba(28, 44, 74) : rgba(19, 30, 52), S(4));
+    draw->AddRect(position, end, rgba(35, 255, 176, hovered ? 1.f : 0.6f), S(4), 0, S(1.5f));
+    const float mark = g_icon_thunderstore.id ? height - S(18) : 0, gap = mark ? S(10) : 0;
+    const char* shown = std::strstr(label, "##"); // what follows only names the button
+    if (!shown) shown = label + std::strlen(label);
+    const auto text = fonts.body->CalcTextSizeA(fonts.body->FontSize, FLT_MAX, 0, label, shown);
+    float x = position.x + std::max(S(10), (size.x - mark - gap - text.x) * 0.5f);
+    if (mark) {
+        const float y = position.y + (height - mark) * 0.5f;
+        draw->AddImage(g_icon_thunderstore.id, ImVec2(x, y), ImVec2(x + mark, y + mark));
+        x += mark + gap;
+    }
+    const ImVec4 clip(position.x, position.y, end.x - S(6), end.y);
+    draw->AddText(fonts.body, fonts.body->FontSize, ImVec2(x, position.y + (height - text.y) * 0.5f), rgba(35, 255, 176), label,
+        shown, 0, &clip);
+    return pressed;
+}
+
 bool rail(const Fonts& fonts, ModsPanel& panel, HWND window, float width,
           const std::vector<const thunderstore::Package*>& pending, bool installing) {
     const auto installed = panel.list.entries.size();
@@ -150,7 +178,8 @@ bool rail(const Fonts& fonts, ModsPanel& panel, HWND window, float width,
     if (ImGui::Button("Install folder", ImVec2(-1, S(32))))
         if (const auto path = pick(window, true); !path.empty()) start_install(panel, path, false);
     if (ImGui::Button("Open Mods folder", ImVec2(-1, S(32)))) open_path(panel.root);
-    if (ImGui::Button("Open Thunderstore", ImVec2(-1, S(32))))
+    ImGui::Dummy(ImVec2(0, S(4)));
+    if (thunderstore_button(fonts, "THUNDERSTORE##visit", S(48)))
         open_url(utf8(thunderstore::community_page(thunderstore::community())));
     ImGui::EndDisabled();
 
@@ -913,7 +942,7 @@ void mods_broken_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, Ui&
 // trust -- so it stays on offer, and taking it is remembered for the session.
 void mods_outdated_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, Ui& ui, ModsPanel& panel) {
     if (!panel.scanned) scan(panel, launcher.session());
-    const auto installed = installed_versions(panel.list);
+    const auto installed = installed_versions(panel.list, true);
     const auto pending = updates(panel.store, installed);
     // Nothing left to update (an update ran, or the listing changed): just go.
     if (pending.empty()) {
