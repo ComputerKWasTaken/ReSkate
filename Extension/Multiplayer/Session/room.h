@@ -89,6 +89,7 @@ struct PoseDelivery {
 // nearest at the full rate with two thirds of what is left, the next nearest at the half
 // rate with the rest. These are the squared distances beyond which a player is sent at the
 // half and at the low rate; `squared` (the distances to the others) is sorted here.
+inline constexpr unsigned crowd_always_full = 8, crowd_always_half = 12;
 struct CrowdLimits {
     float half = std::numeric_limits<float>::infinity(), low = std::numeric_limits<float>::infinity();
 };
@@ -98,8 +99,13 @@ inline CrowdLimits crowd_limits(std::span<float> squared, unsigned tps, unsigned
     if (count * full <= budget) return {};
     std::sort(squared.begin(), squared.end());
     const unsigned spare = budget > count * low ? budget - count * low : 0;
-    const unsigned at_full = std::min(count, spare * 2 / 3 / (full - low));
-    const unsigned at_half = std::min(count - at_full, (spare - at_full * (full - low)) / (half - low));
+    // Whatever the budget, the nearest few are sent at the full rate and the next few at the
+    // half rate: with enough players on, the low rate for everyone is the whole budget, and
+    // without this nobody at all was left at the full rate (and so nobody was heard).
+    const unsigned wanted_full = spare * 2 / 3 / (full - low);
+    const unsigned at_full = std::min(count, std::max(wanted_full, crowd_always_full));
+    const unsigned left = spare > at_full * (full - low) ? spare - at_full * (full - low) : 0;
+    const unsigned at_half = std::min(count - at_full, std::max(left / (half - low), crowd_always_half));
     CrowdLimits limits;
     // Between two players the limit falls halfway, so that neither sits on it.
     const auto after = [&](unsigned sent) {

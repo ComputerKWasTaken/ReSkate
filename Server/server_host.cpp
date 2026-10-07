@@ -177,6 +177,10 @@ void Host::apply_layers() {
 
 // ---- Sending ---------------------------------------------------------------------------------
 namespace {
+// How often a stream's whole state is sent again. A whole pose measured 3.7 KB against 0.7 KB
+// for a difference from one, however old the reference (net's pose size line), so they are
+// kept rare: at every 8 seconds they were a seventh of everything a busy server sent.
+constexpr std::uint64_t whole_state_refresh = 60000000;
 constexpr std::array<const char *, 6> traffic_names{"poses", "sound", "voice", "outfits", "objects", "other"};
 constexpr std::size_t traffic_kind(PacketKind kind) noexcept {
     return kind == PacketKind::pose ? 0 : kind == PacketKind::audio ? 1 : kind == PacketKind::voice ? 2
@@ -498,7 +502,7 @@ void Host::change_map(std::string_view map) {
     for (auto &[id, guest] : guests_) {
         auto &g = *guest;
         auto old = std::exchange(g, Guest{});
-        g.sender.set_refresh(8000000, true); // as for a new player (tick): a new world's streams start over
+        g.sender.set_refresh(whole_state_refresh, true); // as for a new player (tick): a new world's streams start over
         g.traffic = old.traffic;
         g.member = std::move(old.member);
         g.handshaken = old.handshaken;
@@ -961,7 +965,9 @@ std::string Host::network_report(std::string_view player, bool console) {
         for (const auto &link : links) {
             const auto *guest = find(link.id);
             if (std::to_string(link.id) == player || (guest && lower(guest_name(*guest)).starts_with(wanted)))
-                return row(link).substr(2) + (guest ? "\n" + by_kind(guest->traffic) : std::string{});
+                return row(link).substr(2) + (guest ? "\n" + by_kind(guest->traffic) : std::string{}) +
+                       "\nroute: through Steam's relay " + (link.relay.empty() ? std::string("(unknown)") : link.relay) +
+                       " on this side and " + (link.remote_relay.empty() ? std::string("(unknown)") : link.remote_relay) + " on theirs";
         }
         return "No connected player matches \"" + std::string(player) + "\".";
     }
@@ -984,6 +990,17 @@ std::string Host::network_report(std::string_view player, bool console) {
                        std::to_string(queued / 1024) + " KB queued, longest wait " + std::to_string(longest_queue / 1000) + " ms, " +
                        std::to_string(waiting) + " waiting over 50 ms | " + std::to_string(poor) + " under 90% quality";
     if (!console) return text;
+    {
+        // The relay locations in use, most connections first: everyone through one far away is a route problem.
+        std::map<std::string, unsigned> relays;
+        for (const auto &link : links)
+            if (link.measured) ++relays[(link.relay.empty() ? "?" : link.relay) + "-" + (link.remote_relay.empty() ? "?" : link.remote_relay)];
+        std::vector<std::pair<std::string, unsigned>> order(relays.begin(), relays.end());
+        std::stable_sort(order.begin(), order.end(), [](const auto &a, const auto &b) { return a.second > b.second; });
+        text += "\nrelays (ours-theirs):";
+        for (std::size_t i = 0; i < std::min<std::size_t>(order.size(), 10); ++i)
+            text += " " + order[i].first + " x" + std::to_string(order[i].second);
+    }
     text += "\nloop: " + loop_report();
     text += "\n" + by_kind(traffic_);
     if (pose_sizes_.samples && pose_sizes_.sent) {
@@ -1120,7 +1137,7 @@ void Host::tick(std::uint64_t now) {
                 continue;
             }
             auto created = std::make_unique<Guest>();
-            created->sender.set_refresh(8000000, true);
+            created->sender.set_refresh(whole_state_refresh, true);
             created->member.id = link.id;
             created->last_packet = now_;
             guest = created.get();
