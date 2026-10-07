@@ -1,6 +1,8 @@
 #include "server_host.h"
 #include "server_text.h"
 #include "Extension/Multiplayer/Net/wire_codec.h"
+#include "Extension/Multiplayer/Net/block_codec.h"
+#include "Extension/Multiplayer/Net/pose_delta.h"
 #include "Extension/Multiplayer/developer_identity.h"
 #include "Extension/Multiplayer/Session/monotonic_clock.h"
 #include "Engine/Core/Text/word_filter.h"
@@ -44,7 +46,7 @@ std::uint64_t nonce() {
 constexpr std::string_view help_text =
     "status | net [player] | players | say <text> | msg <player> <text> | msg-party <player> <text> | msg-admins <text> | kick <player> | ban <player or SteamID64> [name] | unban <SteamID64> | bans\n"
     "map <name, e.g. San Vansterdam> | maps | name <text> | password <text|off> | welcome <text|off> | listed on|off\n"
-    "tps 20|30|60|120 | voice on|off | voice-range <50-1000> | distances <full> <half> <half-return> <low> | crowd <n>|off | rate <KB/s>\n"
+    "voice on|off | voice-range <50-1000> | distances <full> <half> <half-return> <low> | crowd <n>|off | rate <KB/s>\n"
     "placement everyone|admins|nobody | objects <number>|off | clear-objects | noclip on|off | nobail on|off | boosts on|off | tuning on|off\n"
     "tpall [player] | tphere <player> | votes [map|kick|tod on|off|<percent>] | vote-cancel\n"
     "map-pool [add|remove <map>|clear] | rotation [<minutes>|off]\n"
@@ -203,7 +205,32 @@ void Host::send_required(Guest &g, const std::vector<std::uint8_t> &bytes) {
     if (!p || !send_packet(g, *p, true, false))
         transport_.disconnect(g.member.id, "Cannot deliver required session data. Join again.");
 }
+void Host::measure_pose(Guest &from, const Packet &packet) {
+    auto raw = encode(packet, true);
+    // As DeltaSender would send it: the patch packed, behind its 34 byte header.
+    const auto cost = [&](const Guest::Earlier &reference) -> std::uint64_t {
+        if (reference.raw.empty()) return 0;
+        const auto patch = pose_delta::encode(raw, reference.raw);
+        return patch.empty() ? 0 : 34 + compress_block(patch).bytes.size();
+    };
+    if (packet.sequence % 4 == 0) {
+        const auto last = cost(from.pose_last), quarter = cost(from.pose_quarter), second = cost(from.pose_second);
+        if (last && quarter && second) {
+            ++pose_sizes_.samples;
+            pose_sizes_.whole += encode_wire_bytes(raw).size() + 4;
+            pose_sizes_.last += last;
+            pose_sizes_.quarter += quarter;
+            pose_sizes_.second += second;
+        }
+    }
+    // Each kept reference is replaced once it is its age old, as a whole state sent that often would be.
+    for (auto [kept, age] : {std::pair{&from.pose_quarter, 250000ULL}, std::pair{&from.pose_second, 1000000ULL}})
+        if (kept->raw.empty() || packet.time_us < kept->time || packet.time_us - kept->time >= age) *kept = {raw, packet.time_us};
+    from.pose_last = {std::move(raw), packet.time_us};
+}
 void Host::broadcast(const Packet &packet, bool reliable, bool fresh, std::uint64_t except) {
+    if (packet.kind == PacketKind::pose)
+        if (auto *from = find(packet.source)) measure_pose(*from, packet);
     const auto *source = find(packet.source);
     // Recipients holding the same delta reference share one patch and compression
     // (DeltaCache): every update is built first, then all are sent and recorded.
@@ -272,6 +299,9 @@ void Host::broadcast(const Packet &packet, bool reliable, bool fresh, std::uint6
             } else {
                 delivery->by_distance = 0;
             }
+            // Standing still for a few seconds: five poses a second carry it to anyone. The
+            // rate is back at once when they move (the change of rate sends the next pose).
+            if (source && source->moved_at && now_ - source->moved_at > 3000000) interval = std::max<std::uint32_t>(interval, 200000);
             if (delivery->interval_us != interval) delivery->next_source_time = 0;
             delivery->interval_us = interval;
             if (interval > multiplayer_pose_interval(config_.tps) && packet.time_us < delivery->next_source_time) continue;
@@ -298,6 +328,10 @@ void Host::broadcast(const Packet &packet, bool reliable, bool fresh, std::uint6
                 for (auto *counted : {&out.guest->traffic, &traffic_}) {
                     counted->total.out[traffic_kind(sending.kind)] += out.update.bytes.size();
                     counted->total.snapshots += whole;
+                }
+                if (sending.kind == PacketKind::pose && !whole) {
+                    ++pose_sizes_.sent;
+                    pose_sizes_.sent_bytes += out.update.bytes.size();
                 }
                 out.guest->sender.sent(sending, std::move(out.update));
             }
@@ -544,6 +578,16 @@ bool Host::accept_data(Guest &source, const Packet &p) {
     if (p.kind == PacketKind::pose) {
         source.pose_arrival = now_;
         source.latest_root = p.pose.root;
+        {
+            const auto &root = p.pose.root, &was = source.still_at;
+            float moved{}, facing{};
+            for (unsigned i = 0; i < 3; ++i) moved += (root.position[i] - was.position[i]) * (root.position[i] - was.position[i]);
+            for (unsigned i = 0; i < 4; ++i) facing += root.rotation[i] * was.rotation[i];
+            if (!source.moved_at || moved > 0.05f * 0.05f || std::abs(facing) < 0.9995f) {
+                source.still_at = root;
+                source.moved_at = now_;
+            }
+        }
         return check_speed(source, p.time_us); // last: a speed-check kick frees `source`
     }
     return true;
@@ -942,6 +986,12 @@ std::string Host::network_report(std::string_view player, bool console) {
     if (!console) return text;
     text += "\nloop: " + loop_report();
     text += "\n" + by_kind(traffic_);
+    if (pose_sizes_.samples && pose_sizes_.sent) {
+        const auto each = [&](std::uint64_t sum) { return std::to_string(sum / pose_sizes_.samples) + " B"; };
+        text += "\npose size: " + std::to_string(pose_sizes_.sent_bytes / pose_sizes_.sent) + " B as sent (whole " + each(pose_sizes_.whole) +
+                "); it would be " + each(pose_sizes_.second) + " against a reference renewed every second, " + each(pose_sizes_.quarter) +
+                " every quarter second, " + each(pose_sizes_.last) + " against the pose before (" + std::to_string(pose_sizes_.samples) + " measured)";
+    }
     {
         // Who uploads most, and what most of it is: one player's outfit or objects can cost
         // every other player's connection.
@@ -1507,11 +1557,7 @@ std::string Host::command(std::string_view line, std::uint64_t admin) {
         return changed(*value ? "The server is listed in the server browser." : "The server is hidden; players need the code.");
     }
     if (name == "tps") {
-        const auto value = number(argument);
-        if (!value || !valid_multiplayer_tps(static_cast<unsigned>(*value))) return "tps 20|30|60|120";
-        config_.tps = static_cast<unsigned>(*value);
-        for (auto &[id, guest] : guests_) guest->pose_delivery = {};
-        return changed("Network updates set to " + std::to_string(config_.tps) + " TPS.");
+        return "Dedicated servers run at " + std::to_string(dedicated_tps) + " TPS for now; it cannot be changed.";
     }
     if (name == "voice") {
         const auto value = on_off(argument);

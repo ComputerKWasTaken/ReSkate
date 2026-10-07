@@ -42,7 +42,7 @@ int run() {
     const auto written = text(file);
     check(written.find("\"enforce_tuning\"") != std::string::npos && written.find("\"seconds\"") != std::string::npos,
           "New settings not written into the file");
-    check(config.name == "Old Server" && config.tps == 60 && !config.boosts && config.votes.map.enabled &&
+    check(config.name == "Old Server" && config.tps == dedicated_tps /* fixed: the file's 60 is not kept */ && !config.boosts && config.votes.map.enabled &&
               config.votes.map.percent == 60 && config.enforce_tuning && config.global_bans,
           "The file's own values or the new defaults were lost");
     const auto reloaded = load_config(file);

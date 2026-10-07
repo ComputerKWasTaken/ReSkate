@@ -27,6 +27,7 @@ struct VoteSettings {
 };
 // ReSkateServer.json. Every setting an admin or the console changes is saved
 // back, so a restart keeps it.
+inline constexpr unsigned dedicated_tps = 20;
 struct ServerConfig {
     std::filesystem::path file;
     std::string name = "ReSkate server";
@@ -70,7 +71,10 @@ struct ServerConfig {
     // everyone installs). Each player's fingerprint is in the console when they are flagged.
     std::vector<std::uint64_t> score_allow;
     std::uint16_t port = 27015, query_port = 27016;
-    unsigned tps = multiplayer_default_tps;
+    // Fixed for dedicated servers for now (dedicated_tps): a busy one's traffic, in and out,
+    // is its players' poses, and at 20 a second that is a third less than at 30. Whatever
+    // the file says is read as this; lobbies keep their own choice.
+    unsigned tps = dedicated_tps;
     bool voice_chat = true;
     float voice_range = default_voice_range;
     MultiplayerDistances distances;

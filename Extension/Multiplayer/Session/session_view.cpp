@@ -457,6 +457,9 @@ std::vector<MultiplayerChatCommand> chat_commands(const Session &s) {
         list.push_back({"/party", "/party", "Who is in your party"});
     }
     if (dedicated_host(s)) {
+        // The server's own commands (server_votes.cpp, server_host.cpp): it answers them, and
+        // this list is only what the "/" menu offers, so one left out here still works unseen.
+        list.push_back({"/w", "/w <player> <message>", "Send a player a private message", "player"});
         if (s.server_votes & server_vote_map) list.push_back({"/vote map", "/vote map <map>", "Start a vote to change the map", "map"});
         if (s.server_votes & server_vote_kick)
             list.push_back({"/vote kick", "/vote kick <player>", "Start a vote to kick a player", "player"});
@@ -467,6 +470,9 @@ std::vector<MultiplayerChatCommand> chat_commands(const Session &s) {
             list.push_back({"/no", "/no", "Vote no in the running vote"});
         }
         if (s.server_admin) {
+            list.push_back({"/msg", "/msg <player> <message>", "Admin: message a player privately", "player"});
+            list.push_back({"/msg-party", "/msg-party <player> <message>", "Admin: message everyone in a player's party", "player"});
+            list.push_back({"/msg-admins", "/msg-admins <message>", "Admin: message the admins who are on"});
             list.push_back({"/kick", "/kick <player>", "Admin: kick a player until the server restarts", "player"});
             list.push_back({"/ban", "/ban <player>", "Admin: ban a player", "player"});
             list.push_back({"/map", "/map <map>", "Admin: change the server's map", "map"});

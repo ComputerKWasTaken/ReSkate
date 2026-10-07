@@ -63,7 +63,7 @@ send_rate          The most the server sends one player, in KB/s (default 900,
 crowd_budget       The most position updates a second one player is sent
                    (default 600, 0 for no limit). Players near each other are
                    sent at the full rate (tps); this only matters once more are
-                   in one place than budget / tps, about 20 at 30 TPS. Then the
+                   in one place than budget / tps, about 30 at 20 TPS. Then the
                    nearest stay at the full rate and the farthest of the crowd
                    drop to 10 and 5 a second, instead of everyone's connection
                    filling up. About 1000 is what reaches a player through
@@ -135,7 +135,8 @@ activity_log       Log what players do (default true): throwdown drops placed,
                    joins, starts, turns and results; objects placed or removed;
                    how long players take to load.
 port, query_port   Steam game server ports (default 27015, 27016).
-tps                Network updates per second: 20, 30, 60 or 120.
+tps                Network updates per second. Fixed at 20 on dedicated servers
+                   for now: whatever is set here is read as 20.
 voice_chat         Allow voice chat.
 voice_range        How far proximity voice reaches, 50-1000 m.
 distances          When far-away players update less often (metres).
@@ -193,7 +194,7 @@ and change voice, distances, placement and kicks from the Multiplayer menu.
                                 rotation uses (see map_pool).
   rotation [<minutes>|off]      Change the map on a timer (see map_rotation_minutes).
   name <text>   password <text|off>   welcome <text|off>   listed on|off
-  tps 20|30|60|120   voice on|off   voice-range <m>
+  voice on|off   voice-range <m>
   distances <full> <half> <half-return> <low>
   placement everyone|admins|nobody   clear-objects
   objects <number>|off          How many objects each player may have placed.

@@ -79,6 +79,14 @@ class Host {
         struct PendingCosmetics { Packet packet; std::uint64_t received{}; };
         std::vector<PendingCosmetics> pending_cosmetics;
         std::optional<Transform> latest_root;
+        // Where they last stood and faced, and when they last moved from it: a player standing
+        // still (in a menu, away from the keyboard, watching) is sent on at the low rate.
+        // Their earlier poses, as encoded: the one before, and ones kept a quarter of a second
+        // and a second (measure_pose).
+        struct Earlier { std::vector<std::uint8_t> raw; std::uint64_t time{}; };
+        Earlier pose_last, pose_quarter, pose_second;
+        Transform still_at;
+        std::uint64_t moved_at{};
         std::uint64_t pose_arrival{};
         std::array<PoseDelivery, max_players> pose_delivery;
         CrowdLimits crowd; // how far the full and half rates reach for them in a crowd
@@ -165,6 +173,13 @@ class Host {
     } loop_, last_loop_, worst_loop_;
     std::uint64_t pass_started_{};
     Counted traffic_;
+    // What a pose costs to send as a difference from references of different ages, measured on
+    // every fourth pose that arrives (net). A nearer reference changes less, so it packs
+    // smaller: this says by how much, before the server is made to send them that way.
+    struct PoseSizes {
+        std::uint64_t samples{}, whole{}, last{}, quarter{}, second{}, sent{}, sent_bytes{};
+    } pose_sizes_;
+    void measure_pose(Guest &from, const Packet &packet);
     std::uint64_t traffic_mark_{}, traffic_window_us_{}; // when `mark` was taken, and how long `last` covers
     void meet_later(Guest &guest);
     void introduce();

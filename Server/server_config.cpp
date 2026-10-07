@@ -163,7 +163,7 @@ ServerConfig load_config(const std::filesystem::path &file, std::vector<std::str
     };
     c.port = read_port("port", c.port);
     c.query_port = read_port("query_port", c.query_port);
-    c.tps = root.value("tps", c.tps);
+    c.tps = dedicated_tps; // not the file's (see ServerConfig::tps)
     c.voice_chat = root.value("voice_chat", c.voice_chat);
     c.voice_range = root.value("voice_range", c.voice_range);
     if (root.contains("distances")) {
@@ -274,7 +274,7 @@ std::string config_error(const ServerConfig &c) {
         return "max_players must be 1 to " + std::to_string(max_players - 1) + ".";
     if (c.password.size() > 64) return "password must be at most 64 characters.";
     if (!c.welcome.empty() && !valid_chat_text(c.welcome)) return "welcome must be one chat line (at most 200 bytes).";
-    if (!valid_multiplayer_tps(c.tps)) return "tps must be 20, 30, 60 or 120.";
+    if (c.tps != dedicated_tps) return "tps is " + std::to_string(dedicated_tps) + " on dedicated servers.";
     if (!valid_voice_range(c.voice_range)) return "voice_range must be 50 to 1000.";
     if (!valid_object_limit(c.object_limit)) return "object_limit must be 0 (no limit) to " + std::to_string(max_object_limit) + ".";
     if (!c.distances.valid()) return "distances must be ordered: full_rate_return < half_rate_start <= half_rate_return < low_rate_start <= 10000.";
