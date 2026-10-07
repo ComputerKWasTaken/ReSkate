@@ -130,6 +130,51 @@ void audio_checks() {
     check(raw.size() < packet_header_size + 2 + p.audio.size() * 383, "Sparse audio failed to shrink fixture");
     std::cout << "Audio: continuous coalescing, contact/selector edges, exact values, idle heartbeat, reordering, deduplication and disconnect passed.\n";
 }
+void coarse_checks() {
+    // Coarser rotations still encode and decode as any pose, land within a step of the
+    // original, and make a bone that barely turned the same bytes as before.
+    std::mt19937 random(11);
+    std::uniform_real_distribution<float> any(-1.f, 1.f);
+    auto p = fixture();
+    p.kind = PacketKind::pose;
+    for (auto &t : p.pose.skater) {
+        t.rotation = {any(random), any(random), any(random), any(random)};
+        float norm{};
+        for (float v : t.rotation) norm += v * v;
+        for (float &v : t.rotation) v /= std::sqrt(norm);
+    }
+    // The awkward ones: two components equal and as large as a smaller one can be, and an exact axis.
+    p.pose.skater[0].rotation = {.70710678f, .70710678f, 0, 0};
+    p.pose.skater[1].rotation = {0, 0, 0, -1};
+    p.pose.skater[2].rotation = {.5f, .5f, .5f, .5f};
+    for (const unsigned bits : {4U, 6U, 7U, 11U}) {
+        auto coarse = p;
+        coarsen_rotations(coarse.pose, bits);
+        const auto decoded = decode(encode(coarse, true));
+        check(decoded && decoded->pose.skater.size() == p.pose.skater.size(), "A coarsened pose did not decode");
+        const float step = static_cast<float>(1U << bits) / 46339.5358f;
+        for (std::size_t i = 0; decoded && i < p.pose.skater.size(); ++i) {
+            const auto &a = p.pose.skater[i].rotation, &b = decoded->pose.skater[i].rotation;
+            const float same = std::abs(a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]);
+            // Each of three components is off by at most half a step.
+            check(same > 1.f - 2.f * step * step - 1e-4f, "A coarsened rotation moved by more than its step");
+        }
+        // A turn of a fortieth of a step is lost: the same bytes, so a difference leaves the bone out.
+        auto nudged = p;
+        for (auto &t : nudged.pose.skater) {
+            t.rotation[0] += step * .025f;
+            float norm{};
+            for (float v : t.rotation) norm += v * v;
+            for (float &v : t.rotation) v /= std::sqrt(norm);
+        }
+        coarsen_rotations(nudged.pose, bits);
+        const auto first = encode(coarse, true), second = encode(nudged, true);
+        std::size_t different{};
+        for (std::size_t i = 0; i < std::min(first.size(), second.size()); ++i) different += first[i] != second[i];
+        check(first.size() == second.size() && different < first.size() / 20, "A turn far below the step still changed the pose's bytes");
+    }
+    std::cout << "Coarse rotations: valid poses, within a step, small turns unchanged.\n";
+}
 void rate_checks() {
     check(pose_interval(61*61, 50000) == 100000 && pose_interval(56*56, 100000) == 100000 &&
           pose_interval(49*49, 100000) == 50000, "Near-rate hysteresis failed");
@@ -219,6 +264,6 @@ void block_checks() {
 }
 }
 int main() {
-    try { pose_checks(); audio_checks(); rate_checks(); block_checks(); }
+    try { pose_checks(); audio_checks(); coarse_checks(); rate_checks(); block_checks(); }
     catch (const std::exception &e) { std::cerr << e.what() << '\n'; return 1; }
 }

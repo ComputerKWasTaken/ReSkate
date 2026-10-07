@@ -181,6 +181,13 @@ namespace {
 // for a difference from one, however old the reference (net's pose size line), so they are
 // kept rare: at every 8 seconds they were a seventh of everything a busy server sent.
 constexpr std::uint64_t whole_state_refresh = 60000000;
+// How finely a player's rotations are sent, by how far away the recipient is (coarsen_rotations):
+// within the full rate's reach, the half rate's, the low rate's, and out of sight. The
+// nearest is 0.04 degrees a step, which nothing shows; the low rate's a third of a degree,
+// at 170 m and more; out of sight only where the skater is matters. A bone that turns by less
+// than a step is not sent at all, and a far skater's fingers and face never turn by more.
+constexpr std::array<unsigned, 4> pose_precision{4, 6, 7, 11};
+constexpr std::array<const char *, 4> pose_precision_names{"near", "mid", "far", "out of sight"};
 constexpr std::array<const char *, 6> traffic_names{"poses", "sound", "voice", "outfits", "objects", "other"};
 constexpr std::size_t traffic_kind(PacketKind kind) noexcept {
     return kind == PacketKind::pose ? 0 : kind == PacketKind::audio ? 1 : kind == PacketKind::voice ? 2
@@ -239,7 +246,7 @@ void Host::broadcast(const Packet &packet, bool reliable, bool fresh, std::uint6
     // Recipients holding the same delta reference share one patch and compression
     // (DeltaCache): every update is built first, then all are sent and recorded.
     struct Encoded { Packet packet; std::vector<std::uint8_t> raw, wire; DeltaCache deltas; };
-    std::array<Encoded, 3> encoded;
+    std::array<Encoded, 12> encoded; // by the interval the pose carries, then by precision
     struct Outgoing { Guest *guest; std::uint64_t id; WireUpdate update; PoseDelivery *delivery; std::uint32_t interval; unsigned variant; };
     std::vector<Outgoing> outgoing;
     outgoing.reserve(guests_.size());
@@ -282,6 +289,9 @@ void Host::broadcast(const Packet &packet, bool reliable, bool fresh, std::uint6
             !needs_relay(p.direct_routes, p.route_reported, source->member, now_))
             continue;
         PoseDelivery *delivery{};
+        std::uint32_t slot{}; // how often this source's poses go to them, when not every `interval`
+        bool out_of_sight{};
+        unsigned precision{};
         std::uint32_t interval = multiplayer_pose_interval(config_.tps);
         if (packet.kind == PacketKind::pose) {
             auto entry = std::find_if(p.pose_delivery.begin(), p.pose_delivery.end(),
@@ -300,8 +310,21 @@ void Host::broadcast(const Packet &packet, bool reliable, bool fresh, std::uint6
                 }
                 delivery->by_distance = pose_interval(distance, delivery->by_distance, config_.distances, config_.tps);
                 interval = crowd_interval(delivery->by_distance, distance, p.crowd);
+                // Half as far again as the low rate starts: nothing of a skater can be made out
+                // there, only where they are (their dot, the map).
+                // (A little nearer to come back into sight than to leave it.)
+                const auto sight = static_cast<float>(config_.distances.low_rate_start) * (delivery->precision == 3 ? 1.4f : 1.5f);
+                out_of_sight = config_.distances.valid() && distance > sight * sight;
+                precision = out_of_sight ? 3U : delivery->by_distance == 200000 ? 2U : delivery->by_distance == 100000 ? 1U : 0U;
             } else {
                 delivery->by_distance = 0;
+                precision = delivery->precision;
+            }
+            // By distance only, which changes seldom: a difference from a reference of another
+            // precision carries every bone again, so the reference is renewed with it.
+            if (precision != delivery->precision) {
+                p.sender.forget(packet.source, PacketKind::pose);
+                delivery->precision = static_cast<std::uint8_t>(precision);
             }
             // Standing still for a few seconds: five poses a second carry it to anyone. The
             // rate is back at once when they move (the change of rate sends the next pose).
@@ -309,16 +332,21 @@ void Host::broadcast(const Packet &packet, bool reliable, bool fresh, std::uint6
             if (delivery->interval_us != interval) delivery->next_source_time = 0;
             delivery->interval_us = interval;
             if (interval > multiplayer_pose_interval(config_.tps) && packet.time_us < delivery->next_source_time) continue;
+            // Out of sight, one pose a second is sent (as low-rate poses, a game holds a skater
+            // it hears nothing of for several seconds). On a full server most players are out
+            // of each other's sight, and at five a second each they were most of what was sent.
+            slot = out_of_sight && interval == 200000 ? 1000000U : interval;
         }
-        const auto variant = interval == 200000 ? 2U : interval == 100000 ? 1U : 0U;
+        const auto variant = (interval == 200000 ? 2U : interval == 100000 ? 1U : 0U) * 4 + precision;
         auto &data = encoded[variant];
         if (data.raw.empty()) {
             data.packet = packet;
             data.packet.pose_interval_us = interval;
+            if (packet.kind == PacketKind::pose) coarsen_rotations(data.packet.pose, pose_precision[precision]);
             data.raw = encode(data.packet, true);
             data.wire = encode_wire_bytes(data.raw);
         }
-        outgoing.push_back({&p, id, p.sender.prepare(data.packet, data.raw, data.wire, data.deltas), delivery, interval, variant});
+        outgoing.push_back({&p, id, p.sender.prepare(data.packet, data.raw, data.wire, data.deltas), delivery, slot ? slot : interval, variant});
     }
     for (auto &out : outgoing) {
         // A packet that cannot be built for anyone is its source's fault, never this
@@ -334,8 +362,8 @@ void Host::broadcast(const Packet &packet, bool reliable, bool fresh, std::uint6
                     counted->total.snapshots += whole;
                 }
                 if (sending.kind == PacketKind::pose && !whole) {
-                    ++pose_sizes_.sent;
-                    pose_sizes_.sent_bytes += out.update.bytes.size();
+                    ++pose_sizes_.sent[out.variant % 4];
+                    pose_sizes_.sent_bytes[out.variant % 4] += out.update.bytes.size();
                 }
                 out.guest->sender.sent(sending, std::move(out.update));
             }
@@ -1003,11 +1031,14 @@ std::string Host::network_report(std::string_view player, bool console) {
     }
     text += "\nloop: " + loop_report();
     text += "\n" + by_kind(traffic_);
-    if (pose_sizes_.samples && pose_sizes_.sent) {
+    if (pose_sizes_.samples) {
         const auto each = [&](std::uint64_t sum) { return std::to_string(sum / pose_sizes_.samples) + " B"; };
-        text += "\npose size: " + std::to_string(pose_sizes_.sent_bytes / pose_sizes_.sent) + " B as sent (whole " + each(pose_sizes_.whole) +
-                "); it would be " + each(pose_sizes_.second) + " against a reference renewed every second, " + each(pose_sizes_.quarter) +
-                " every quarter second, " + each(pose_sizes_.last) + " against the pose before (" + std::to_string(pose_sizes_.samples) + " measured)";
+        text += "\npose size as sent:";
+        for (std::size_t i = 0; i < pose_sizes_.sent.size(); ++i)
+            if (pose_sizes_.sent[i])
+                text += std::string(" ") + pose_precision_names[i] + " " + std::to_string(pose_sizes_.sent_bytes[i] / pose_sizes_.sent[i]) + " B x" +
+                        std::to_string(pose_sizes_.sent[i]);
+        text += "; as it arrives " + each(pose_sizes_.last) + " against the pose before, whole " + each(pose_sizes_.whole);
     }
     {
         // Who uploads most, and what most of it is: one player's outfit or objects can cost

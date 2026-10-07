@@ -79,6 +79,7 @@ struct PoseDelivery {
     std::uint32_t interval_us = 50000;
     std::uint64_t next_source_time{};
     std::uint32_t by_distance{}; // what the distance alone asked for, before any crowd limit
+    std::uint8_t precision{};    // how finely the source's rotations are sent to them (a dedicated server's pose_precision)
 };
 // A crowd in one place: every player there is within full-rate distance of every other, and
 // what one player is sent grows with the crowd until their connection cannot carry it. The
