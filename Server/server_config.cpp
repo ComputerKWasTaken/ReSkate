@@ -23,6 +23,12 @@ Json to_json(const ServerConfig &c) {
     root["map_pool"] = std::move(pool);
     root["map_rotation_minutes"] = c.map_rotation;
     root["max_players"] = c.max_players;
+    root["reserved_slots"] = c.reserved_slots;
+    root["crowd_budget"] = c.crowd_budget;
+    root["send_rate"] = c.send_rate;
+    auto reserved = Json::array();
+    for (const auto id : c.reserved) reserved.push_back(std::to_string(id)); // as strings, like the admins
+    root["reserved"] = std::move(reserved);
     root["password"] = c.password;
     root["welcome"] = c.welcome;
     root["listed"] = c.listed;
@@ -124,6 +130,11 @@ ServerConfig load_config(const std::filesystem::path &file, std::vector<std::str
             if (map.is_string() && !map.string().empty()) c.map_pool.push_back(map.string());
     c.map_rotation = std::min(root.value("map_rotation_minutes", c.map_rotation), max_map_rotation);
     c.max_players = root.value("max_players", c.max_players);
+    c.reserved_slots = root.value("reserved_slots", c.reserved_slots);
+    c.crowd_budget = root.value("crowd_budget", c.crowd_budget);
+    c.send_rate = root.value("send_rate", c.send_rate);
+    if (root.contains("reserved") && root.at("reserved").is_array())
+        for (const auto &id : root.at("reserved")) c.reserved.push_back(steam_id(id));
     c.password = root.value("password", c.password);
     c.welcome = root.value("welcome", c.welcome);
     c.listed = root.value("listed", c.listed);
@@ -234,9 +245,22 @@ std::optional<std::uint64_t> parse_scoring(std::string_view text) {
     if (!value) return std::nullopt;
     return value;
 }
+bool may_join(const ServerConfig &config, std::uint64_t id, std::size_t on) noexcept {
+    if (on >= config.max_players) return false;
+    const auto listed = [&](const std::vector<std::uint64_t> &ids) { return std::find(ids.begin(), ids.end(), id) != ids.end(); };
+    return on + config.reserved_slots < config.max_players || listed(config.reserved) || listed(config.admins);
+}
 std::string config_error(const ServerConfig &c) {
     using namespace multiplayer;
     if (!valid_server_name(c.name)) return std::string("name must be ") + server_name_rule + ".";
+    for (const auto id : c.reserved)
+        if (!individual_steam_id(id)) return "reserved must be SteamID64s (17 digits starting 7656119).";
+    if (c.reserved_slots >= c.max_players) return "reserved_slots must be less than max_players, so that anyone can join at all.";
+    if (c.reserved.size() > 1024) return "reserved holds at most 1024 players.";
+    if (c.send_rate < 128 || c.send_rate > 16384) return "send_rate must be 128 to 16384 (KB/s for each player).";
+    if (!valid_crowd_budget(c.crowd_budget))
+        return "crowd_budget must be 0 (no limit) or " + std::to_string(min_crowd_budget) + " to " +
+               std::to_string(max_crowd_budget) + ".";
     if (c.steam_token.size() > 64 || !std::all_of(c.steam_token.begin(), c.steam_token.end(), [](unsigned char ch) { return std::isalnum(ch); }))
         return "steam_token must be a game server login token (letters and digits), or empty to sign in anonymously.";
     if (c.map.empty() || !valid_map_destination(map_destination(c.map)))

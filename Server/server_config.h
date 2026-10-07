@@ -36,6 +36,14 @@ struct ServerConfig {
     std::vector<std::string> map_pool; // maps for votes and the rotation, in order; empty: every map
     unsigned map_rotation = 0;         // minutes per map before the next pool map (0: off)
     unsigned max_players = 16; // players; the server itself is not one
+    // Of those, how many are kept for the players in `reserved` and the admins: everyone else
+    // is told the server is full once only these are left. 0: none are kept.
+    unsigned reserved_slots = 0;
+    // The most poses a second one player is sent (crowd_limits); 0: no limit.
+    unsigned crowd_budget = crowd_pose_budget;
+    // What the server may send each player, in KB/s (128-16384).
+    unsigned send_rate = 900;
+    std::vector<std::uint64_t> reserved;
     std::string password;      // empty: anyone may join
     std::string welcome;       // sent to each player as they join
     bool listed = true;        // shown in the in-game server browser
@@ -88,6 +96,9 @@ struct ServerConfig {
 // their names go to `added` ("votes.seconds" for a nested one).
 ServerConfig load_config(const std::filesystem::path &file, std::vector<std::string> *added = nullptr);
 void save_config(const ServerConfig &config);
+// Whether a player who is not yet on may join a server with `on` players on it: anyone while
+// an unreserved slot is free, then only the reserved players and the admins until it is full.
+bool may_join(const ServerConfig &config, std::uint64_t id, std::size_t on) noexcept;
 // Why `config` cannot run, or empty.
 std::string config_error(const ServerConfig &config);
 // A scoring fingerprint as the config and console write it (16 hex digits), and read back

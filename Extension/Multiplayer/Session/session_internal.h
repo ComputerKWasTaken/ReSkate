@@ -1,6 +1,7 @@
 #pragma once
 #include "Engine/Game/Multiplayer/chat_rate.h"
 #include "session.h"
+#include "Extension/Multiplayer/developer_identity.h"
 #include "Extension/Customization/developer_hoodie.h"
 #include "Extension/Customization/developer_board.h"
 #include "Extension/Multiplayer/Remote/native_skater.h"
@@ -324,9 +325,12 @@ inline bool dedicated_host(const Session &s) { return s.mode == Mode::join && ga
 // Whether Steam itself vouches for this player's identity to this PC: a host's guests and a
 // guest's host are connected directly, and so is another guest once the direct handshake is
 // done. Anyone else is known only from the host's roster, which a host can fill as it likes,
-// so what rests on who a player is (the developer and friend marks) waits for this.
+// so what rests on who a player is (the developer and friend marks) waits for this. An
+// official server is the exception: Steam vouches for it to this PC and for each player to
+// it, and it is ours, so its roster is taken at its word. On a busy one a player is
+// connected directly to only the few nearest, and the rest would show no tag.
 inline bool steam_vouched(const Session &s, const Peer &peer) {
-    return s.mode != Mode::join || peer.member.id == s.host_id || peer.direct_ready;
+    return s.mode != Mode::join || peer.member.id == s.host_id || peer.direct_ready || official_server(s.host_id);
 }
 // Whether a player shows the tag the backend gives them, and whether the items that come with
 // it animate: not until their appearance has arrived, and not when it says they turned that

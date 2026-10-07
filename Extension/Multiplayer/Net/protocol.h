@@ -322,6 +322,8 @@ class PoseBuffer {
     bool sample(std::uint64_t now_us, Pose &out) const;
     std::optional<Pose> sample(std::uint64_t now_us) const;
     bool sample_remote(std::uint64_t now_us, Pose &out);
+    // Whether a pose arrived within this long: sampling gives up after a second without one.
+    bool heard_within(std::uint64_t now_us, std::uint64_t age_us) const;
     std::optional<Pose> sample_remote(std::uint64_t now_us);
     PosePlayback playback() const { return playback_; }
     void clear();
