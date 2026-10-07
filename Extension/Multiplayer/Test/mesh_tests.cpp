@@ -29,6 +29,9 @@ void remove_remote_network_objects(std::uint64_t owner, std::uint64_t epoch) {
 std::string network_object_status() { return {}; }
 bool simulated_placement_allowed = true;
 void set_lobby_object_placement_allowed(bool allowed) { simulated_placement_allowed = allowed; }
+unsigned simulated_object_limit{};
+void set_lobby_object_limit(unsigned limit) noexcept { simulated_object_limit = limit; }
+unsigned lobby_object_limit() noexcept { return simulated_object_limit; }
 unsigned simulated_guest_wipes{};
 bool clear_lobby_guest_objects() { ++simulated_guest_wipes; return true; }
 }
@@ -411,6 +414,16 @@ void join_tick_checks() {
             tick(0, 0, true, map, nullptr);
             check(guest.mode == Mode::join && guest.host_id == host.host_id && guest.joined_public_lobby == 9001,
                   "A Steam join click must not replace an active session");
+            // Picking the server they are on in the browser changes nothing either; picking
+            // another one leaves this session for it.
+            check(queue_command("join-lobby", "9001", {}), "A browser pick should enter the normal queue");
+            tick(0, 0, true, map, nullptr);
+            check(guest.mode == Mode::join && guest.host_id == host.host_id && guest.joined_public_lobby == 9001,
+                  "Picking the current server replaced the session");
+            check(queue_command("join-lobby", "9002", {}), "A browser hop should enter the normal queue");
+            tick(0, 0, true, map, nullptr);
+            check(guest.joined_public_lobby != 9001 && guest.status != "Leave your current session before joining another lobby.",
+                  "A guest could not hop to another server from the browser");
         }
     }
     stop(guest, "Timeout checks");

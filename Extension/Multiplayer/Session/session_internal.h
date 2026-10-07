@@ -146,6 +146,7 @@ struct Session {
     std::uint64_t next_publish{}, last_client_log{}, next_party_update{};
     MultiplayerDistances distances;
     ObjectPlacement object_placement = ObjectPlacement::everyone;
+    unsigned object_limit{}; // objects each player may have placed; 0: no limit
     // What guests may use: the host's choice, or the host's roster for a guest.
     bool guest_noclip = true, guest_no_bail = true, guest_boosts = true;
     // Host: guests skate with its physics tuning. Guest: the host's roster says so (a
@@ -242,6 +243,7 @@ struct Session {
         std::string lobby_name;
         MultiplayerDistances distances;
         ObjectPlacement placement = ObjectPlacement::everyone;
+        unsigned object_limit = default_object_limit;
         float voice_range = default_voice_range;
         bool guest_noclip = true, guest_no_bail = true, guest_boosts = true;
         bool enforce_tuning = true;
@@ -363,7 +365,7 @@ void refresh_friends(Session &s);
 void add_chat(Session &s, std::uint64_t sender, std::string name, std::string text, bool local = false, bool marks = true);
 // The colour and badge of one of the backend's categories.
 std::pair<std::uint32_t, std::string> mark_role(IdentityList list);
-// A player's role colour and badge ("Dev", "Creator", "Centrix", "Homie", "Admin", "Host", "Friend" or none), shown in chat
+// A player's role colour and badge ("Dev", "Staff", "Creator", "Centrix", "Homie", "Admin", "Host", "Friend" or none), shown in chat
 // and on their nametag. `local`: the local player.
 std::pair<std::uint32_t, std::string> player_role(Session &s, std::uint64_t id, bool local, bool marks = true);
 // Sends one line from this player; returns why not when it cannot.
@@ -433,6 +435,8 @@ void networking(Session &s, const NativeFrame &local, std::uint64_t now);
 // session_commands.cpp
 void apply_distances(Session &s, const MultiplayerDistances &distances);
 void apply_object_placement(Session &s, ObjectPlacement policy);
+// The session's limit, and this game's own share of it: none while hosting or as a server's admin.
+void apply_object_limit(Session &s, unsigned limit);
 // Stores what guests may use and applies it to the local player (the host and a dedicated
 // server's admins are exempt).
 void apply_guest_tools(Session &s, bool noclip, bool no_bail, bool boosts);
