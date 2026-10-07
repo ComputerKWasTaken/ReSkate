@@ -58,6 +58,15 @@ max_players        1-249.
 password           Empty for anyone; otherwise players type it to join.
 welcome            A chat line sent to each player as they join.
 listed             false hides the server; players then need the code.
+steam_token        A Steam game server login token, or empty (default). Without one
+                   the server signs in anonymously and gets a new Steam ID every
+                   start. With one it keeps the same Steam ID, printed at startup.
+                   Make a token at steamcommunity.com/dev/managegameservers with
+                   App ID 3354750; each running server needs its own. Keep it
+                   private: anyone with it can sign in as your server.
+                   The ReSkate team can set the in-game server browser to show
+                   only servers that have one; the server says so in its log when
+                   that hides it. Players can always join with the code.
 auto_update        Install new ReSkate releases when nobody is on (default true).
 global_bans        Turn away players the ReSkate team has banned from multiplayer
                    (default true). The list is read from api.reskate.dev at startup
