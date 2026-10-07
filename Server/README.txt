@@ -42,7 +42,7 @@ straight away (players are told to rejoin). Turn this off with
 
 ReSkateServer.json
 ------------------
-name               Shown in the browser: 1-64 letters, numbers, spaces and - _ [ ] ( ).
+name               Shown in the browser: 1-64 letters, numbers, spaces and - _ / [ ] ( ).
 map                The map everyone skates, named like the game's load command:
                    "San Vansterdam", "Isle of Grom", "Super Ultra Mega Resort",
                    "Stadium 1", or a custom map such as "bbcity" (see Custom maps).
@@ -58,6 +58,15 @@ max_players        1-249.
 password           Empty for anyone; otherwise players type it to join.
 welcome            A chat line sent to each player as they join.
 listed             false hides the server; players then need the code.
+steam_token        A Steam game server login token, or empty (default). Without one
+                   the server signs in anonymously and gets a new Steam ID every
+                   start. With one it keeps the same Steam ID, printed at startup.
+                   Make a token at steamcommunity.com/dev/managegameservers with
+                   App ID 3354750; each running server needs its own. Keep it
+                   private: anyone with it can sign in as your server.
+                   The ReSkate team can set the in-game server browser to show
+                   only servers that have one; the server says so in its log when
+                   that hides it. Players can always join with the code.
 auto_update        Install new ReSkate releases when nobody is on (default true).
 global_bans        Turn away players the ReSkate team has banned from multiplayer
                    (default true). The list is read from api.reskate.dev at startup
@@ -110,6 +119,9 @@ voice_chat         Allow voice chat.
 voice_range        How far proximity voice reaches, 50-1000 m.
 distances          When far-away players update less often (metres).
 object_placement   everyone, admins (only admins can build), or nobody.
+object_limit       How many objects each player may have placed, 1-1024
+                   (default 100), or 0 for no limit. Admins are not limited.
+                   A player at the limit deletes one to place another.
 noclip, no_bail,   Let players use noclip (and tp) / No Bail / the forward and up
 boosts             boosts (default true; admins always can).
 enforce_tuning     Players skate with the game's own Gameplay/SkatePhysicsTuning,
@@ -154,6 +166,7 @@ and change voice, distances, placement and kicks from the Multiplayer menu.
   tps 20|30|60|120   voice on|off   voice-range <m>
   distances <full> <half> <half-return> <low>
   placement everyone|admins|nobody   clear-objects
+  objects <number>|off          How many objects each player may have placed.
   noclip on|off   nobail on|off   boosts on|off
                                 What players may use (admins always can).
   tuning on|off                 Everyone on the game's own physics tuning.
