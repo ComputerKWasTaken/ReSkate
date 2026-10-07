@@ -8,7 +8,8 @@
 
 namespace dingosdk::multiplayer::menu_view {
 enum class Sort { name, players, map };
-struct BrowserOptions { std::string query; bool same_map{}; Sort sort{}; };
+// The busiest servers first, until the player picks another order.
+struct BrowserOptions { std::string query; bool same_map{}; Sort sort = Sort::players; };
 
 // Owned pages: Multiplayer and Custom Stuff (needs the overlay's tool callbacks).
 inline constexpr unsigned page_count = 2, tools_page = 1;

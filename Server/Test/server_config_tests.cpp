@@ -62,8 +62,9 @@ int run() {
     check(token_refused(tokened), "An overlong steam_token was accepted");
     save_config(reloaded);
 
-    // Server names: letters, digits, spaces and - _ [ ] ( ) only.
-    check(valid_server_name("Old Server") && valid_server_name("[EU] Skate_Park-2 (24x7)") && valid_server_name("a"),
+    // Server names: letters, digits, spaces and - _ / [ ] ( ) only.
+    check(valid_server_name("Old Server") && valid_server_name("[EU] Skate_Park-2 (24x7)") && valid_server_name("a") &&
+              valid_server_name("EU/West 24/7") && !valid_server_name("///") && !valid_server_name("a\\b"),
           "A plain server name was refused");
     check(!valid_server_name("") && !valid_server_name(std::string(65, 'a')) && !valid_server_name("Best! Server") &&
               !valid_server_name("caf\xC3\xA9") && !valid_server_name("a.b") && !valid_server_name("<b>x</b>") &&

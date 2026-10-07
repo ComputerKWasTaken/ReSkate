@@ -13,16 +13,16 @@
 
 namespace dingosdk {
 constexpr unsigned max_map_rotation = 1440; // minutes a server's rotation keeps one map, at most
-// A dedicated server's name: 1 to 64 letters, digits, spaces and - _ [ ] ( ), with a
+// A dedicated server's name: 1 to 64 letters, digits, spaces and - _ / [ ] ( ), with a
 // letter or digit among them and no space at either end. A server refuses any other
 // name, and the server browser does not show one.
-inline constexpr char server_name_rule[] = "1 to 64 letters, numbers, spaces and - _ [ ] ( )";
+inline constexpr char server_name_rule[] = "1 to 64 letters, numbers, spaces and - _ / [ ] ( )";
 [[nodiscard]] constexpr bool valid_server_name(std::string_view name) noexcept {
     if (name.empty() || name.size() > 64 || name.front() == ' ' || name.back() == ' ') return false;
     bool named{};
     for (const auto c : name) {
         const bool word = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
-        if (!word && std::string_view(" -_[]()").find(c) == std::string_view::npos) return false;
+        if (!word && std::string_view(" -_/[]()").find(c) == std::string_view::npos) return false;
         named |= word;
     }
     return named;

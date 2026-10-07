@@ -57,6 +57,7 @@ int main() {
         check(missing_tabs({1, 2, 3, 4}, 8, false) == std::vector<unsigned>{0},
             "The Multiplayer page does not wait for the overlay's tool callbacks");
         MultiplayerModel model;
+        const BrowserOptions by_name{{}, false, Sort::name};
         model.local_id = 77; model.map = "Levels/San_Vansterdam";
         for (unsigned i = 0; i < 14; ++i) {
             MultiplayerLobby lobby;
@@ -66,7 +67,7 @@ int main() {
             lobby.players = static_cast<int>(i + 1); lobby.capacity = 16;
             model.lobbies.push_back(lobby);
         }
-        auto result = browse(model, {});
+        auto result = browse(model, by_name);
         check(result.total == 14 && result.lobbies.size() == 14, "All matching lobbies remain scrollable");
         check(result.lobbies.front()->id == 100 && result.lobbies[6]->id == 112 && result.lobbies.back()->id == 113,
               "Stable ordering of duplicate names across the full list");
@@ -84,12 +85,12 @@ int main() {
         result = browse(model, options);
         check(result.lobbies[0]->id == 105 && result.lobbies[1]->id == 102 && result.lobbies[2]->players == 14,
               "Official servers are not first when sorting by players");
-        result = browse(model, {});
+        result = browse(model, by_name);
         check(result.lobbies[0]->id == 102 && result.lobbies[1]->id == 105 && result.lobbies[2]->id == 100,
               "Official servers are not first when sorting by name");
         // Then the servers friends are in, which a search for a friend's name finds too.
         model.lobbies[9].friends = {"Ana"};
-        result = browse(model, {});
+        result = browse(model, by_name);
         check(result.lobbies[0]->id == 102 && result.lobbies[1]->id == 105 && result.lobbies[2]->id == 109 && result.lobbies[3]->id == 100,
               "A friend's server is not next after the official ones");
         BrowserOptions by_friend;

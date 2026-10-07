@@ -42,7 +42,7 @@ straight away (players are told to rejoin). Turn this off with
 
 ReSkateServer.json
 ------------------
-name               Shown in the browser: 1-64 letters, numbers, spaces and - _ [ ] ( ).
+name               Shown in the browser: 1-64 letters, numbers, spaces and - _ / [ ] ( ).
 map                The map everyone skates, named like the game's load command:
                    "San Vansterdam", "Isle of Grom", "Super Ultra Mega Resort",
                    "Stadium 1", or a custom map such as "bbcity" (see Custom maps).
