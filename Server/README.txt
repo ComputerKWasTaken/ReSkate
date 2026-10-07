@@ -119,6 +119,9 @@ voice_chat         Allow voice chat.
 voice_range        How far proximity voice reaches, 50-1000 m.
 distances          When far-away players update less often (metres).
 object_placement   everyone, admins (only admins can build), or nobody.
+object_limit       How many objects each player may have placed, 1-1024
+                   (default 100), or 0 for no limit. Admins are not limited.
+                   A player at the limit deletes one to place another.
 noclip, no_bail,   Let players use noclip (and tp) / No Bail / the forward and up
 boosts             boosts (default true; admins always can).
 enforce_tuning     Players skate with the game's own Gameplay/SkatePhysicsTuning,
@@ -163,6 +166,7 @@ and change voice, distances, placement and kicks from the Multiplayer menu.
   tps 20|30|60|120   voice on|off   voice-range <m>
   distances <full> <half> <half-return> <low>
   placement everyone|admins|nobody   clear-objects
+  objects <number>|off          How many objects each player may have placed.
   noclip on|off   nobail on|off   boosts on|off
                                 What players may use (admins always can).
   tuning on|off                 Everyone on the game's own physics tuning.

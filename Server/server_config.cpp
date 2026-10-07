@@ -50,6 +50,7 @@ Json to_json(const ServerConfig &c) {
     distances["low_rate_start"] = c.distances.low_rate_start;
     root["distances"] = std::move(distances);
     root["object_placement"] = placement_text(c.object_placement);
+    root["object_limit"] = c.object_limit;
     root["noclip"] = c.noclip;
     root["no_bail"] = c.no_bail;
     root["boosts"] = c.boosts;
@@ -179,6 +180,7 @@ ServerConfig load_config(const std::filesystem::path &file, std::vector<std::str
         c.votes.seconds = std::clamp(votes.value("seconds", c.votes.seconds), 10U, 300U);
         c.votes.cooldown = std::clamp(votes.value("cooldown_seconds", c.votes.cooldown), 0U, 3600U);
     }
+    c.object_limit = root.value("object_limit", c.object_limit);
     const auto placement = root.value("object_placement", placement_text(c.object_placement));
     // On a dedicated server the protocol's "host only" means its admins.
     c.object_placement = placement == "nobody" ? ObjectPlacement::nobody
@@ -250,6 +252,7 @@ std::string config_error(const ServerConfig &c) {
     if (!c.welcome.empty() && !valid_chat_text(c.welcome)) return "welcome must be one chat line (at most 200 bytes).";
     if (!valid_multiplayer_tps(c.tps)) return "tps must be 20, 30, 60 or 120.";
     if (!valid_voice_range(c.voice_range)) return "voice_range must be 50 to 1000.";
+    if (!valid_object_limit(c.object_limit)) return "object_limit must be 0 (no limit) to " + std::to_string(max_object_limit) + ".";
     if (!c.distances.valid()) return "distances must be ordered: full_rate_return < half_rate_start <= half_rate_return < low_rate_start <= 10000.";
     for (unsigned lot = 0; lot < park_lots.size(); ++lot)
         if (c.parks[lot].empty() || !valid_park(lot, c.parks[lot]))

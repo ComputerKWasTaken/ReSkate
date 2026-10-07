@@ -50,6 +50,8 @@ void load_host_preferences(Session &s) {
         p.voice_range = value->get<float>();
     if (const auto value = number("Host.ObjectPlacement"); value && *value >= 0 && valid_object_placement(static_cast<std::uint64_t>(*value)))
         p.placement = static_cast<ObjectPlacement>(*value);
+    if (const auto value = number("Host.ObjectLimit"); value && *value >= 0 && valid_object_limit(static_cast<std::uint64_t>(*value)))
+        p.object_limit = static_cast<unsigned>(*value);
     p.guest_noclip = profile_runtime::local_preference("Host.GuestNoclip").value_or(true);
     p.guest_no_bail = profile_runtime::local_preference("Host.GuestNoBail").value_or(true);
     p.guest_boosts = profile_runtime::local_preference("Host.GuestBoosts").value_or(true);
@@ -70,6 +72,7 @@ void save_host_preferences(const Session &s) {
         {"Host.Distance.HalfReturn", static_cast<std::int64_t>(p.distances.half_rate_return)},
         {"Host.Distance.LowStart", static_cast<std::int64_t>(p.distances.low_rate_start)},
         {"Host.ObjectPlacement", static_cast<std::int64_t>(p.placement)},
+        {"Host.ObjectLimit", static_cast<std::int64_t>(p.object_limit)},
         {"Host.GuestNoclip", p.guest_noclip},
         {"Host.GuestNoBail", p.guest_no_bail},
         {"Host.GuestBoosts", p.guest_boosts},
@@ -147,6 +150,9 @@ void publish(Session &s, const NativeFrame *local) {
     view.tps = s.tps;
     view.distances = s.distances;
     view.object_placement = s.object_placement;
+    view.object_limit = s.object_limit;
+    view.object_limit_own = s.mode == Mode::host || s.server_admin ? 0 : s.object_limit; // as apply_object_limit gives this game
+    view.objects_placed = s.mode == Mode::off ? 0 : static_cast<unsigned>(s.local_objects.objects().size());
     view.guest_noclip = s.guest_noclip;
     view.guest_no_bail = s.guest_no_bail;
     view.guest_boosts = s.guest_boosts;

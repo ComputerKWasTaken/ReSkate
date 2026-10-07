@@ -68,6 +68,8 @@ struct ServerConfig {
     MultiplayerDistances distances;
     // everyone, admins (only the admins below may build) or nobody.
     ObjectPlacement object_placement = ObjectPlacement::everyone;
+    // Objects each player may have placed (object_placement.h); 0: no limit. Admins are not held to it.
+    unsigned object_limit = default_object_limit;
     // Whether players may use noclip (and teleport) / No Bail / the boosts (admins always may).
     bool noclip = true, no_bail = true, boosts = true;
     // Players skate with the game's own physics tuning, not copies they edited.

@@ -25,7 +25,7 @@ namespace dingosdk::multiplayer {
 constexpr std::size_t max_skater_bones = 512, max_board_bones = 64;
 constexpr std::size_t max_packet = 24576;
 constexpr std::size_t packet_header_size = 64;
-constexpr std::uint16_t protocol_version = 42;
+constexpr std::uint16_t protocol_version = 43;
 constexpr std::size_t max_throwdown_message = 4096;
 // Packet::tuning: the host's SkatePhysicsTuning differences (Extension/Skater/physics_tuning.h).
 constexpr std::size_t max_physics_tuning = 16384;
@@ -171,6 +171,8 @@ struct Packet {
     // lock their editor and native tools from it; the host enforces it by
     // freezing guest layouts (see publish_guest_objects).
     ObjectPlacement object_placement = ObjectPlacement::everyone;
+    // Objects each player may have placed (object_placement.h); 0: no limit.
+    unsigned object_limit{};
     // Bumped each time the host deletes all guest objects. Guests delete their
     // own session objects when it changes after their first roster.
     std::uint32_t object_clears{};

@@ -60,6 +60,15 @@ int run() {
     check(token_refused(tokened), "A steam_token with other characters was accepted");
     tokened.steam_token = std::string(65, 'A');
     check(token_refused(tokened), "An overlong steam_token was accepted");
+    // object_limit: 100 unless set (0 is no limit), and kept on a rewrite.
+    check(has("object_limit") && config.object_limit == 100, "object_limit is not a new setting of 100");
+    auto limited = reloaded;
+    limited.object_limit = 50;
+    save_config(limited);
+    check(load_config(file).object_limit == 50, "object_limit was not kept");
+    limited.object_limit = 0;
+    save_config(limited);
+    check(load_config(file).object_limit == 0, "No object limit became the default again");
     save_config(reloaded);
 
     // Server names: letters, digits, spaces and - _ / [ ] ( ) only.

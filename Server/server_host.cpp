@@ -45,7 +45,7 @@ constexpr std::string_view help_text =
     "status | players | say <text> | msg <player> <text> | msg-party <player> <text> | msg-admins <text> | kick <player> | ban <player or SteamID64> [name] | unban <SteamID64> | bans\n"
     "map <name, e.g. San Vansterdam> | maps | name <text> | password <text|off> | welcome <text|off> | listed on|off\n"
     "tps 20|30|60|120 | voice on|off | voice-range <50-1000> | distances <full> <half> <half-return> <low>\n"
-    "placement everyone|admins|nobody | clear-objects | noclip on|off | nobail on|off | boosts on|off | tuning on|off\n"
+    "placement everyone|admins|nobody | objects <number>|off | clear-objects | noclip on|off | nobail on|off | boosts on|off | tuning on|off\n"
     "tpall [player] | tphere <player> | votes [map|kick|tod on|off|<percent>] | vote-cancel\n"
     "map-pool [add|remove <map>|clear] | rotation [<minutes>|off]\n"
     "park <lot> <layout> | layer-sync on|off | layer <key> default|on|off | tod <time|default>\n"
@@ -261,6 +261,7 @@ void Host::send_roster() {
     p.voice_range = config_.voice_range;
     p.distances = config_.distances;
     p.object_placement = config_.object_placement;
+    p.object_limit = config_.object_limit;
     p.guest_noclip = config_.noclip;
     p.guest_no_bail = config_.no_bail;
     p.guest_boosts = config_.boosts;
@@ -698,6 +699,8 @@ void Host::sync_objects() {
              (config_.object_placement == ObjectPlacement::host_only && is_admin(id)))) {
             auto layout = guest->objects.layout();
             std::erase_if(layout, [&](const auto &object) { return guest->cleared.contains(object.id); });
+            // No more of a player's objects than the server allows each of them; admins are not limited.
+            if (!is_admin(id)) layout = limited_layout(std::move(layout), guest->shared.objects(), config_.object_limit);
             if (config_.activity_log) activity_.objects(id, guest->shared.layout(), layout);
             guest->shared.replace(layout);
             guest->shared_from = guest->objects.revision();
@@ -840,6 +843,7 @@ std::string Host::command(std::string_view line, std::uint64_t admin) {
     const auto verb = lower(action);
     // The in-game menu's names for the same settings.
     const std::string name = verb == "voice-allow" ? "voice" : verb == "object-placement" ? "placement"
+                           : verb == "object-limit" ? "objects"
                            : verb == "world-layer-sync" ? "layer-sync" : verb == "noclip-allow" ? "noclip"
                            : verb == "nobail-allow" ? "nobail" : verb == "boosts-allow" ? "boosts"
                            : verb == "tuning-enforce" ? "tuning" : verb;
@@ -1189,6 +1193,14 @@ std::string Host::command(std::string_view line, std::uint64_t admin) {
         return changed(*policy == ObjectPlacement::everyone ? "Everyone can place objects."
                        : *policy == ObjectPlacement::host_only ? "Only admins can place objects. Everyone else's are frozen."
                                                                : "Object placement is off. Existing objects stay.");
+    }
+    if (name == "objects") {
+        const auto limit = parse_object_limit(argument);
+        if (!limit) return "objects <1-" + std::to_string(max_object_limit) + ">|off";
+        config_.object_limit = *limit;
+        for (auto &[id, guest] : guests_) guest->shared_from = 0; // look at every layout again
+        return changed(*limit ? "Each player can place up to " + std::to_string(*limit) + " objects. Admins are not limited."
+                              : std::string("Players can place as many objects as they like."));
     }
     if (name == "votes") {
         // votes | votes <map|kick|tod> on|off|<percent> | votes seconds|cooldown <n>
