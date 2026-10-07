@@ -84,12 +84,11 @@ void draw_background(ImDrawList* draw, ImVec2 size, float time) {
 }
 
 // A tile's icon centred at `centre`; false when it isn't loaded (use the drawn one).
-bool tile_icon(ImDrawList* draw, const Background& icon, ImVec2 centre, float size, bool hovered, float idle = 0.32f,
-               float hot = 0.6f) {
+bool tile_icon(ImDrawList* draw, const Background& icon, ImVec2 centre, float size, bool hovered) {
     if (!icon.id) return false;
     const float half = size * 0.5f;
     draw->AddImage(icon.id, ImVec2(centre.x - half, centre.y - half), ImVec2(centre.x + half, centre.y + half),
-        ImVec2(0, 0), ImVec2(1, 1), rgba(255, 255, 255, hovered ? hot : idle));
+        ImVec2(0, 0), ImVec2(1, 1), rgba(255, 255, 255, hovered ? 0.6f : 0.32f));
     return true;
 }
 
@@ -212,10 +211,8 @@ bool mods_tile(ImDrawList* draw, const Fonts& fonts, ImVec2 position, ImVec2 siz
         draw->AddText(fonts.body, fonts.body->FontSize, ImVec2(position.x + S(20), detail_y),
             bad ? color::danger : color::muted, detail.c_str(), nullptr, 0, &clip);
     }
-    // Thunderstore's mark, where the mods come from, in its own green: less faded than the
-    // wheel on SETTINGS, which is only white. The skate tool when the mark is not built in.
+    // The skate tool, faded like the wheel on SETTINGS.
     const ImVec2 centre(end.x - S(46), position.y + size.y * 0.5f);
-    if (tile_icon(draw, g_icon_thunderstore, centre, S(62), hovered, 0.7f, 1.f)) return pressed;
     if (tile_icon(draw, g_icon_mods, centre, S(56), hovered)) return pressed;
     const ImU32 ink = rgba(255, 255, 255, hovered ? 0.55f : 0.3f);
     for (int layer = 0; layer < 3; ++layer) {
