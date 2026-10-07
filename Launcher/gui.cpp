@@ -435,7 +435,10 @@ int run(const launcher_app::Session& session, const std::vector<std::wstring>& a
         const auto ui_storage = std::make_unique<Ui>();
         auto& ui = *ui_storage;
         ModsPanel mods_panel;
-        PadFeed pad_feed;
+        // The Steam Deck's right trackpad reaches the launcher as the right stick
+        // (Steam sets SteamDeck=1 for what it starts there), which wants a
+        // trackpad's feel rather than a thumbstick's.
+        PadFeed pad_feed(GetEnvironmentVariableW(L"SteamDeck", nullptr, 0) > 0);
         g_pad_feed = &pad_feed;
         bool running = true;
         HANDLE game{};
@@ -490,6 +493,7 @@ int run(const launcher_app::Session& session, const std::vector<std::wstring>& a
             const bool foreground = GetForegroundWindow() == window;
             pad_feed.update(ImGui::GetIO(), foreground ? read_pad() : PadState{}, g_scale);
             ImGui::NewFrame();
+            pad_feed.after_new_frame();
             frame(launcher, fonts, window, ui, mods_panel);
             // While the pad moves the focus, the mouse cursor (the Deck's trackpad in its
             // desktop layout) hides; the next mouse move hides the focus and brings it back.

@@ -24,15 +24,25 @@ constexpr std::uint16_t focus_bits = dpad_up | dpad_down | dpad_left | dpad_righ
 
 // XInput's left stick dead zone.
 constexpr float left_dead_zone = 7849.0f / 32767.0f;
-// Larger on the right: a thumb resting on the Deck's trackpad is never quite
-// centred, and the pointer must not creep under it.
-constexpr float right_dead_zone = 0.2f;
-// Pointer speed at full tilt, in design pixels a second.
-constexpr float pointer_speed = 1400.0f;
-// Scrolling at full tilt: design pixels a second for the focused panel, and
-// mouse wheel notches a second (ImGui scrolls five lines a notch) under a pointer.
+// Scrolling at full tilt, in design pixels a second.
 constexpr float scroll_speed = 1200.0f;
-constexpr float wheel_speed = 16.0f;
+
+// How the right stick drives the pointer.
+struct PointerFeel {
+    float dead_zone;
+    float speed;      // design pixels a second at full tilt
+    bool squared;     // a small tilt is slow, for placing the pointer precisely
+    bool cut_glide;   // stop once the tilt only fades
+};
+// A thumbstick sets a speed. A resting thumb is never quite centred, so the
+// dead zone is large.
+constexpr PointerFeel stick_feel{0.2f, 1400.0f, true, false};
+// The Steam Deck's trackpad, in Steam's gamepad layouts, tilts the stick by how
+// fast the thumb swipes and keeps gliding after it lifts, fading out. Small
+// swipes must move the pointer, and the glide must not carry it on.
+constexpr PointerFeel trackpad_feel{0.06f, 2600.0f, false, true};
+// Frames of a steadily fading tilt that make it a glide rather than the thumb.
+constexpr int glide_frames = 4;
 // A mouse move this close to the last one is the same place reported again.
 constexpr float pointer_slack = 2.0f;
 
@@ -41,20 +51,17 @@ float axis(std::int16_t value) { return std::clamp(static_cast<float>(value) / 3
 // The left stick scrolls whatever the user is looking at: the panel holding
 // the pad's focus while the focus is shown, else the one under the pointer.
 // ImGui's own stick scrolling only ever moves the focused window, which under a
-// pointer is usually the page itself, with nothing to scroll.
-void scroll(ImGuiIO& io, float tilt, float scale) {
+// pointer is usually the page itself, with nothing to scroll. It scrolls the
+// panel directly: wheel events would queue behind the pointer's moves and lag.
+void scroll(const ImGuiIO& io, float tilt, float scale) {
     const float amount = std::copysign(std::clamp((std::abs(tilt) - left_dead_zone) / (1 - left_dead_zone), 0.0f, 1.0f), tilt);
     if (amount == 0.0f) return;
     const ImGuiContext& g = *GImGui;
-    if (g.NavCursorVisible && g.NavHighlightItemUnderNav) {
-        // The nearest panel around the focus that can scroll.
-        ImGuiWindow* window = g.NavWindow;
-        while (window && window->ScrollMax.y <= 0 && (window->Flags & ImGuiWindowFlags_ChildWindow)) window = window->ParentWindow;
-        if (window && window->ScrollMax.y > 0)
-            ImGui::SetScrollY(window, window->Scroll.y - amount * scroll_speed * scale * io.DeltaTime);
-        return;
-    }
-    io.AddMouseWheelEvent(0, amount * wheel_speed * io.DeltaTime);
+    ImGuiWindow* window = g.NavCursorVisible && g.NavHighlightItemUnderNav ? g.NavWindow : g.HoveredWindow;
+    // The nearest panel around it that can scroll.
+    while (window && window->ScrollMax.y <= 0 && (window->Flags & ImGuiWindowFlags_ChildWindow)) window = window->ParentWindow;
+    if (window && window->ScrollMax.y > 0)
+        ImGui::SetScrollY(window, window->Scroll.y - amount * scroll_speed * scale * io.DeltaTime);
 }
 
 // B goes to ImGui's own cancel while ImGui has something to cancel: a combo or
@@ -99,22 +106,28 @@ void PadFeed::update(ImGuiIO& io, const PadState& input, float scale) {
     // a pointer moves, so the pointer goes away instead. Scrolling keeps both.
     if (pressed & focus_bits) pointing_ = false;
 
+    const PointerFeel& feel = trackpad_ ? trackpad_feel : stick_feel;
     const float x = axis(pad.right_x), y = -axis(pad.right_y);   // screen Y grows downward
     const float tilt = std::min(1.0f, std::sqrt(x * x + y * y));
+    if (feel.cut_glide) {
+        // A glide only ever fades; the thumb speeds up again or stops.
+        if (tilt <= feel.dead_zone || tilt > last_tilt_ + 0.01f) fading_ = 0;
+        else if (tilt < last_tilt_) ++fading_;
+        last_tilt_ = tilt;
+    }
+    const bool steering = tilt > feel.dead_zone && fading_ < glide_frames;
     // The first R3 only shows the pointer: a stray click must not press
     // whatever the mouse last rested on.
     const bool click = pointing_ && (pressed & right_thumb);
-    if (!pointing_ && (tilt > right_dead_zone || (pressed & right_thumb))) {
+    if (!pointing_ && (steering || (pressed & right_thumb))) {
         pointing_ = true;
         // From wherever the mouse left it, which may be outside the window.
         pointer_ = ImGui::IsMousePosValid(&io.MousePos) ? io.MousePos
                                                         : ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f);
     }
-    if (pointing_ && tilt > right_dead_zone) {
-        // Squared, so a small tilt places the pointer precisely and a full one
-        // crosses the window in about a second.
-        const float speed = (tilt - right_dead_zone) / (1 - right_dead_zone);
-        const float step = speed * speed * pointer_speed * scale * io.DeltaTime / tilt;
+    if (pointing_ && steering) {
+        const float speed = (tilt - feel.dead_zone) / (1 - feel.dead_zone);
+        const float step = (feel.squared ? speed * speed : speed) * feel.speed * scale * io.DeltaTime / tilt;
         pointer_.x += x * step;
         pointer_.y += y * step;
     }
@@ -132,6 +145,65 @@ void PadFeed::update(ImGuiIO& io, const PadState& input, float scale) {
         io.AddMouseButtonEvent(ImGuiMouseButton_Left, click);
     }
     io.MouseDrawCursor = pointing_;
+}
+
+void PadFeed::after_new_frame() {
+    ImGuiContext& g = *GImGui;
+    // ImGui looks to the side only along a thin band through the middle of the
+    // focus, so it misses an item level with the gap between two list rows: the
+    // rail's tiles beside a list. A side move that found nothing looks again
+    // across the focus's full height.
+    if (side_dir_ != ImGuiDir_None && g.NavId == side_from_ && g.NavWindow && !g.NavMoveSubmitted) {
+        const ImGuiDir dir = side_dir_;
+        side_dir_ = ImGuiDir_None;
+        ImGui::NavMoveRequestSubmit(dir, dir, ImGuiNavMoveFlags_None,
+            ImGuiScrollFlags_KeepVisibleEdgeX | ImGuiScrollFlags_KeepVisibleEdgeY);
+        g.NavScoringRect = ImGui::WindowRectRelToAbs(g.NavWindow, g.NavWindow->NavRectRel[g.NavLayer]);
+        last_nav_id_ = g.NavId;
+        return;
+    }
+    side_dir_ = ImGuiDir_None;
+    if (g.NavMoveSubmitted && (g.NavMoveDir == ImGuiDir_Left || g.NavMoveDir == ImGuiDir_Right)) {
+        side_dir_ = g.NavMoveDir;
+        // ImGui clears the focus for the move when the item is wider than its
+        // panel; the move then lands on that same item, which is no move either.
+        side_from_ = g.NavId ? g.NavId : last_nav_id_;
+    }
+    last_nav_id_ = g.NavId;
+}
+
+namespace {
+bool g_row_focused{};
+} // namespace
+
+void default_focus() {
+    ImGui::SetItemDefaultFocus();
+    ImGuiContext& g = *GImGui;
+    // With a pad there, the focus starts on it straight away as the window
+    // appears: when the launcher starts, and when the pad opened this page.
+    // (Not whenever nothing has the focus: ImGui clears it for a frame while
+    // the focus moves off a row wider than its panel.)
+    const bool pad = (g.IO.BackendFlags & ImGuiBackendFlags_HasGamepad) != 0;
+    const bool pad_led = g.NavCursorVisible && g.NavHighlightItemUnderNav;
+    if (!pad || !ImGui::IsWindowAppearing() || !(pad_led || g.FrameCount <= 2)) return;
+    ImGui::SetFocusID(g.LastItemData.ID, g.CurrentWindow);
+    g.NavCursorVisible = true;
+    g.NavHighlightItemUnderNav = true;
+}
+
+void begin_row() {
+    const ImGuiID scope = ImGui::GetID("##row_focus");
+    g_row_focused = GImGui->NavFocusScopeId == scope;
+    ImGui::PushFocusScope(scope);
+}
+
+void row_buttons() {
+    ImGui::PushItemFlag(ImGuiItemFlags_NoNav, !g_row_focused);
+}
+
+void end_row() {
+    ImGui::PopItemFlag();
+    ImGui::PopFocusScope();
 }
 
 void PadFeed::mouse_moved(ImVec2 position) {

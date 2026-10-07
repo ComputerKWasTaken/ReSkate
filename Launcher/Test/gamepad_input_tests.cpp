@@ -22,6 +22,7 @@ void check(bool condition, const char* what) {
     ++failures;
 }
 
+constexpr std::uint16_t dpad_up = 0x0001, dpad_left = 0x0004;
 constexpr std::uint16_t dpad_down = 0x0002, dpad_right = 0x0008, right_thumb = 0x0080, button_a = 0x1000, button_b = 0x2000;
 
 struct Seen {
@@ -39,6 +40,7 @@ Seen frame(PadFeed& feed, const PadState& pad, bool open_menu = false, bool pane
     io.DeltaTime = 1.0f / 60.0f;
     feed.update(io, pad, 1.0f);
     ImGui::NewFrame();
+    feed.after_new_frame();
     Seen seen;
     ImGui::SetNextWindowPos(ImVec2(0, 0));
     ImGui::SetNextWindowSize(ImVec2(800, 600));
@@ -99,6 +101,56 @@ std::string press(PadFeed& feed, std::uint16_t button) {
     return pressed.empty() ? released : pressed;
 }
 
+// The Mod manager's layout: a rail of tabs beside a list whose rows carry
+// buttons, the rail's tiles level with the gaps between rows.
+std::string mods_page(PadFeed& feed, const PadState& state) {
+    auto& io = ImGui::GetIO();
+    io.DisplaySize = ImVec2(900, 700);
+    io.DeltaTime = 1.0f / 60.0f;
+    feed.update(io, state, 1.0f);
+    ImGui::NewFrame();
+    feed.after_new_frame();
+    std::string pressed;
+    ImGui::SetNextWindowPos(ImVec2(0, 0));
+    ImGui::SetNextWindowSize(ImVec2(900, 700));
+    ImGui::Begin("##page", nullptr, ImGuiWindowFlags_NoDecoration);
+    ImGui::SetCursorPos(ImVec2(20, 100));
+    ImGui::BeginChild("##rail", ImVec2(200, 400), ImGuiChildFlags_NavFlattened);
+    if (ImGui::Button("MY MODS", ImVec2(150, 40))) pressed = "MY MODS";
+    dingosdk::launcher_gui::default_focus();
+    if (ImGui::Button("GET MODS", ImVec2(150, 40))) pressed = "GET MODS";
+    ImGui::EndChild();
+    ImGui::SetCursorPos(ImVec2(260, 100));
+    ImGui::BeginChild("##content", ImVec2(600, 500), ImGuiChildFlags_NavFlattened);
+    for (int row = 0; row < 12; ++row) {
+        ImGui::PushID(row);
+        dingosdk::launcher_gui::begin_row();
+        const ImVec2 start = ImGui::GetCursorScreenPos();
+        if (ImGui::Selectable("##row", false, ImGuiSelectableFlags_AllowOverlap, ImVec2(560, 60)))
+            pressed = "row " + std::to_string(row);
+        const ImVec2 next = ImGui::GetCursorScreenPos();
+        dingosdk::launcher_gui::row_buttons();
+        ImGui::SetCursorScreenPos(ImVec2(start.x + 380, start.y + 14));
+        if (ImGui::Button("INSTALL", ImVec2(100, 32))) pressed = "install " + std::to_string(row);
+        dingosdk::launcher_gui::end_row();
+        ImGui::SetCursorScreenPos(next);
+        ImGui::PopID();
+    }
+    ImGui::EndChild();
+    ImGui::End();
+    ImGui::Render();
+    return pressed;
+}
+
+// Taps a D-pad direction on the Mod manager, then A: what A pressed is where the focus went.
+std::string mods_tap(PadFeed& feed, std::uint16_t button) {
+    mods_page(feed, pad(button));
+    for (int i = 0; i < 3; ++i) mods_page(feed, pad());
+    std::string pressed = mods_page(feed, pad(button_a));
+    pressed += mods_page(feed, pad());
+    return pressed;
+}
+
 void fresh() {
     if (ImGui::GetCurrentContext()) ImGui::DestroyContext();
     ImGui::CreateContext();
@@ -136,6 +188,33 @@ int main() {
         frame(feed, gone);
         check(!ImGui::IsKeyDown(ImGuiKey_GamepadFaceDown), "An unplugged pad lets go of A");
         check(!(ImGui::GetIO().BackendFlags & ImGuiBackendFlags_HasGamepad), "An unplugged pad is no gamepad");
+    }
+
+    // ------------------------------------------------ the Mod manager
+    {
+        fresh();
+        PadFeed feed;
+        mods_page(feed, pad());
+        mods_page(feed, pad());
+        check(GImGui->NavCursorVisible && mods_tap(feed, 0) == "MY MODS",
+              "With a pad connected the page opens with the focus on its tab");
+        check(mods_tap(feed, dpad_down) == "GET MODS", "Down goes to the next tab");
+        const auto row = mods_tap(feed, dpad_right);
+        check(row.rfind("row ", 0) == 0, "Right goes from a tab level with a gap between rows into the list");
+        check(mods_tap(feed, dpad_left) == "GET MODS", "Left goes from the list back to the tabs");
+        mods_tap(feed, dpad_right);
+        const int first = std::stoi(mods_tap(feed, dpad_down).substr(4));
+        check(mods_tap(feed, dpad_down) == "row " + std::to_string(first + 1), "Down goes to the next row in one press");
+        check(mods_tap(feed, dpad_up) == "row " + std::to_string(first), "Up goes to the row above in one press");
+        check(mods_tap(feed, dpad_right) == "install " + std::to_string(first), "Right goes to the row's own button");
+        check(mods_tap(feed, dpad_up) == "row " + std::to_string(first - 1), "Up from a row's button goes to the row above");
+    }
+    {
+        fresh();
+        PadFeed feed;
+        mods_page(feed, PadState{});
+        mods_page(feed, PadState{});
+        check(!GImGui->NavCursorVisible, "Without a pad nothing shows a focus");
     }
 
     // ------------------------------------------------ back
@@ -225,6 +304,39 @@ int main() {
         for (int i = 0; i < 30; ++i) scroll = frame(feed, pad(0, 0, 0, -32767), false, false, true).list_scroll;
         scroll = frame(feed, pad(), false, false, true).list_scroll;
         check(scroll > 100, "The left stick scrolls the panel under the mouse");
+    }
+
+    // ------------------------------------------------ the Steam Deck's trackpad
+    {
+        fresh();
+        PadFeed stick;
+        PadFeed trackpad(true);
+        ImGui::GetIO().AddMousePosEvent(400, 300);
+        frame(trackpad, pad());
+        for (int i = 0; i < 10; ++i) frame(trackpad, pad(0, 3300, 0));   // a slow swipe
+        frame(trackpad, pad());
+        check(ImGui::GetIO().MousePos.x > 405, "A slow swipe on the trackpad moves the pointer");
+        fresh();
+        ImGui::GetIO().AddMousePosEvent(400, 300);
+        frame(stick, pad());
+        for (int i = 0; i < 10; ++i) frame(stick, pad(0, 3300, 0));
+        frame(stick, pad());
+        check(!stick.pointing() && ImGui::GetIO().MousePos.x == 400, "The same small tilt of a thumbstick does not");
+
+        fresh();
+        PadFeed glide(true);
+        ImGui::GetIO().AddMousePosEvent(100, 300);
+        frame(glide, pad());
+        for (int i = 0; i < 5; ++i) frame(glide, pad(0, 20000, 0));   // the swipe
+        float tilt = 20000;
+        float stopped = 0;
+        for (int i = 0; i < 30; ++i) {   // the thumb lifted: the tilt only fades
+            tilt *= 0.9f;
+            frame(glide, pad(0, static_cast<std::int16_t>(tilt), 0));
+            if (i == 6) stopped = ImGui::GetIO().MousePos.x;
+        }
+        frame(glide, pad());
+        check(stopped > 100 && ImGui::GetIO().MousePos.x == stopped, "The trackpad's glide after the thumb lifts does not carry the pointer on");
     }
 
     // ------------------------------------------------ trackpad pointer

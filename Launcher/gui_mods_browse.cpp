@@ -518,10 +518,12 @@ void browse_page(Launcher& launcher, const Fonts& fonts, ModsPanel& panel, float
         const ImVec2 start = ImGui::GetCursorScreenPos();
         const float width = ImGui::GetContentRegionAvail().x;
         // The row itself opens the overview; the widgets on it keep their clicks.
+        begin_row();
         if (list_row("##row", width, tall, ticked)) {
             store.selected = package.full_name;
             store.overview = false;
         }
+        row_buttons();
         const float right = start.x + width;
         const float text_x = start.x + S(82);
         mod_icon(panel, &package, ImVec2(start.x + S(14), start.y + S(11)), S(56));
@@ -572,6 +574,7 @@ void browse_page(Launcher& launcher, const Fonts& fonts, ModsPanel& panel, float
             std::format("v{}{}  /  {} downloads  /  {}", version.number,
                 version.file_size ? "  /  " + size_text(version.file_size) : std::string(),
                 count_text(package.downloads), date_text(package.date_updated)).c_str());
+        end_row();
         ImGui::PopID();
     });
     ImGui::EndDisabled();

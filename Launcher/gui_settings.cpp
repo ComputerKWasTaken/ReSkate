@@ -127,9 +127,12 @@ void settings_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, Ui& ui
     ImGui::BeginChild("##settings_rail", ImVec2(rail_width, bottom - rail_top), ImGuiChildFlags_NavFlattened);
     static constexpr std::array<const char*, 4> names{"GAME", "DISPLAY", "KEYS", "ADVANCED"};
     ImGui::BeginDisabled(binding);
-    for (int i = 0; i < static_cast<int>(names.size()); ++i)
+    for (int i = 0; i < static_cast<int>(names.size()); ++i) {
         if (nav_tile(fonts, rail_width, names[static_cast<std::size_t>(i)], ui.settings_tab == i))
             ui.settings_tab = i;
+        // A controller starts on the open tab's tile.
+        if (ui.settings_tab == i) default_focus();
+    }
     ImGui::SetCursorPosY(ImGui::GetWindowHeight() - S(38));
     push_primary_button();
     if (ImGui::Button("\xe2\x86\x90  BACK", ImVec2(-1, S(34)))) open = false;

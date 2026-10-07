@@ -28,9 +28,14 @@ struct PadState {
 //   click is R3, so this is what makes the trackpad a mouse in the launcher.
 class PadFeed {
 public:
+    // `trackpad`: the right stick is a Steam Deck's trackpad, not a thumbstick.
+    explicit PadFeed(bool trackpad = false) : trackpad_(trackpad) {}
     // Call once a frame after the backends' NewFrame and before
     // ImGui::NewFrame(), which takes the events in.
     void update(ImGuiIO& io, const PadState& pad, float scale);
+    // Call right after ImGui::NewFrame(): looks again for a D-pad left or right
+    // that ImGui found nothing for.
+    void after_new_frame();
     // A mouse move or a touch the window received (WM_MOUSEMOVE, client area
     // pixels). A move to a new place takes the pointer back from the pad.
     void mouse_moved(ImVec2 position);
@@ -40,12 +45,31 @@ public:
     bool pointing() const { return pointing_; }
 
 private:
+    bool trackpad_{};
     std::uint16_t buttons_{};
+    float last_tilt_{};
+    int fading_{};        // frames the right stick's tilt only faded
+    ImGuiDir side_dir_{ImGuiDir_None};   // a D-pad left or right ImGui looked for last frame
+    ImGuiID side_from_{};
+    ImGuiID last_nav_id_{};
     ImGuiKey back_key_{ImGuiKey_Escape};
     bool pointing_{};
     bool clicking_{};   // R3 holds the left button
     ImVec2 pointer_{};
     ImVec2 mouse_{-1, -1};   // where the last mouse move was
 };
+
+// Makes the item just submitted the one a controller starts on in its window.
+// With a pad connected, the focus moves there at once when nothing has it yet
+// or when the pad opened the page.
+void default_focus();
+
+// A list row a controller treats as one item: up and down go from row to row
+// in one press, and the buttons on a row take the focus only from the row
+// itself (D-pad right). begin_row() before the row's list_row, row_buttons()
+// after it, end_row() after the row's last button.
+void begin_row();
+void row_buttons();
+void end_row();
 
 } // namespace dingosdk::launcher_gui

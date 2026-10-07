@@ -129,10 +129,13 @@ bool rail(const Fonts& fonts, ModsPanel& panel, HWND window, float width,
                             : pending.size() == 1 ? std::string("1 update on Thunderstore")
                                                   : std::format("{} updates on Thunderstore", pending.size())))
         panel.tab = 0;
+    // A controller starts on the open tab's tile.
+    if (panel.tab == 0) default_focus();
     if (nav_tile(fonts, width, "GET MODS", panel.tab == 1,
             store.loaded ? std::to_string(store.packages.size()) : std::string("..."), false,
             store.loaded ? std::string() : std::string("Loading the Thunderstore listing")))
         panel.tab = 1;
+    if (panel.tab == 1) default_focus();
 
     ImGui::Dummy(ImVec2(0, S(8)));
     if (!pending.empty()) {
@@ -316,8 +319,10 @@ void installed_row(const Fonts& fonts, ModsPanel& panel, const thunderstore::Ins
     const ImVec2 start = ImGui::GetCursorScreenPos();
     const float width = ImGui::GetContentRegionAvail().x;
     const bool ticked = panel.marked.contains(mod.name);
+    begin_row();
     const bool pressed = list_row("##row", width, tall, ticked);
     bool menu = ImGui::IsItemClicked(ImGuiMouseButton_Right);
+    row_buttons();
     if (pressed) {
         // Ctrl and Shift pick, as they do in a file list; a plain click opens the mod.
         if (ImGui::GetIO().KeyShift) mark(panel, view, position, true, true);
@@ -399,6 +404,7 @@ void installed_row(const Fonts& fonts, ModsPanel& panel, const thunderstore::Ins
     if (const auto detail = summary(panel, mod); !detail.empty())
         draw->AddText(fonts.body, fonts.body->FontSize, ImVec2(text_x, start.y + S(37)), color::muted, detail.c_str(),
             nullptr, 0, &clip);
+    end_row();
 
     if (menu) ImGui::OpenPopup("##menu");
     if (ImGui::BeginPopup("##menu")) {
