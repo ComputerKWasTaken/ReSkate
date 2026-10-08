@@ -44,7 +44,6 @@ class Host {
     std::uint64_t secret() const { return secret_; }
     // The UDP port players may connect straight to, or 0 (config connection).
     std::uint16_t direct_port() const { return direct_port_; }
-    const std::string &direct_address() const { return config_.direct_address; }
 
     enum class VoteKind { map, kick, time };
 
