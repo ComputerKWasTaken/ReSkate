@@ -32,17 +32,15 @@ struct PointerFeel {
     float dead_zone;
     float speed;      // design pixels a second at full tilt
     bool squared;     // a small tilt is slow, for placing the pointer precisely
-    bool cut_glide;   // stop once the tilt only fades
 };
 // A thumbstick sets a speed. A resting thumb is never quite centred, so the
 // dead zone is large.
-constexpr PointerFeel stick_feel{0.2f, 1400.0f, true, false};
+constexpr PointerFeel stick_feel{0.2f, 1400.0f, true};
 // The Steam Deck's trackpad, in Steam's gamepad layouts, tilts the stick by how
-// fast the thumb swipes and keeps gliding after it lifts, fading out. Small
-// swipes must move the pointer, and the glide must not carry it on.
-constexpr PointerFeel trackpad_feel{0.06f, 2600.0f, false, true};
-// Frames of a steadily fading tilt that make it a glide rather than the thumb.
-constexpr int glide_frames = 4;
+// fast the thumb swipes, and a quick swipe already tilts it all the way. The
+// tilt drops back to rest the moment the thumb lifts. Small swipes must move
+// the pointer and a quick one must cross the window.
+constexpr PointerFeel trackpad_feel{0.06f, 2600.0f, false};
 // A mouse move this close to the last one is the same place reported again.
 constexpr float pointer_slack = 2.0f;
 
@@ -109,13 +107,7 @@ void PadFeed::update(ImGuiIO& io, const PadState& input, float scale) {
     const PointerFeel& feel = trackpad_ ? trackpad_feel : stick_feel;
     const float x = axis(pad.right_x), y = -axis(pad.right_y);   // screen Y grows downward
     const float tilt = std::min(1.0f, std::sqrt(x * x + y * y));
-    if (feel.cut_glide) {
-        // A glide only ever fades; the thumb speeds up again or stops.
-        if (tilt <= feel.dead_zone || tilt > last_tilt_ + 0.01f) fading_ = 0;
-        else if (tilt < last_tilt_) ++fading_;
-        last_tilt_ = tilt;
-    }
-    const bool steering = tilt > feel.dead_zone && fading_ < glide_frames;
+    const bool steering = tilt > feel.dead_zone;
     // The first R3 only shows the pointer: a stray click must not press
     // whatever the mouse last rested on.
     const bool click = pointing_ && (pressed & right_thumb);
@@ -147,34 +139,83 @@ void PadFeed::update(ImGuiIO& io, const PadState& input, float scale) {
     io.MouseDrawCursor = pointing_;
 }
 
-void PadFeed::after_new_frame() {
-    ImGuiContext& g = *GImGui;
-    // ImGui looks to the side only along a thin band through the middle of the
-    // focus, so it misses an item level with the gap between two list rows: the
-    // rail's tiles beside a list. A side move that found nothing looks again
-    // across the focus's full height.
-    if (side_dir_ != ImGuiDir_None && g.NavId == side_from_ && g.NavWindow && !g.NavMoveSubmitted) {
-        const ImGuiDir dir = side_dir_;
-        side_dir_ = ImGuiDir_None;
-        ImGui::NavMoveRequestSubmit(dir, dir, ImGuiNavMoveFlags_None,
-            ImGuiScrollFlags_KeepVisibleEdgeX | ImGuiScrollFlags_KeepVisibleEdgeY);
-        g.NavScoringRect = ImGui::WindowRectRelToAbs(g.NavWindow, g.NavWindow->NavRectRel[g.NavLayer]);
-        last_nav_id_ = g.NavId;
-        return;
-    }
-    side_dir_ = ImGuiDir_None;
-    if (g.NavMoveSubmitted && (g.NavMoveDir == ImGuiDir_Left || g.NavMoveDir == ImGuiDir_Right)) {
-        side_dir_ = g.NavMoveDir;
-        // ImGui clears the focus for the move when the item is wider than its
-        // panel; the move then lands on that same item, which is no move either.
-        side_from_ = g.NavId ? g.NavId : last_nav_id_;
-    }
-    last_nav_id_ = g.NavId;
+namespace {
+
+// The list row holding the focus, as it was last drawn.
+struct FocusedRow {
+    ImGuiID scope{}, window{};
+    ImRect rect;   // relative to its window
+};
+FocusedRow g_focused_row;
+bool g_row_focused{};
+ImGuiID g_row_scope{};
+
+// The outermost of the flattened panels around a window: a page's rail, or
+// its content with the list inside it.
+ImGuiWindow* column_of(ImGuiWindow* window) {
+    if (!(window->ChildFlags & ImGuiChildFlags_NavFlattened)) return nullptr;
+    while (window->ParentWindow && (window->ParentWindow->ChildFlags & ImGuiChildFlags_NavFlattened))
+        window = window->ParentWindow;
+    return window;
 }
 
-namespace {
-bool g_row_focused{};
 } // namespace
+
+void PadFeed::after_new_frame() {
+    ImGuiContext& g = *GImGui;
+    const ImGuiID nav_window = g.NavWindow ? g.NavWindow->ID : 0;
+    // ImGui lets go of an item its panel only partly shows, to move from the
+    // part in view, and falls back to the page's default item, a rail tab,
+    // when that move finds nothing. The focus stays where it was instead.
+    if (g.NavMoveSubmitted && !g.NavId && last_nav_id_ && nav_window == last_nav_window_) {
+        g.NavId = last_nav_id_;
+        g.NavInitRequest = g.NavInitRequestFromMove = false;
+    }
+
+    // Up and down from a list row leave the row, from whichever of its parts
+    // has the focus: ImGui looks along the line the focus last went sideways
+    // on, and finds the row's own tick or switch just above or below it.
+    if (g.NavMoveSubmitted && (g.NavMoveDir == ImGuiDir_Up || g.NavMoveDir == ImGuiDir_Down) &&
+        g_focused_row.scope && g.NavFocusScopeId == g_focused_row.scope)
+        if (ImGuiWindow* window = ImGui::FindWindowByID(g_focused_row.window)) {
+            const ImRect row = ImGui::WindowRectRelToAbs(window, g_focused_row.rect);
+            g.NavScoringRect.Min.y = g.NavScoringRect.Max.y = g.NavMoveDir == ImGuiDir_Up ? row.Min.y : row.Max.y;
+        }
+
+    // ImGui looks to the side only along one line through the focus, so from a
+    // list row it misses the rail's tiles above or below it. A side move that
+    // found nothing looks again: across the focus's full height, for a tile
+    // level with the gap between two rows; then at every height from the edge
+    // of the focus's column, nearest first, for BACK far under a row.
+    if (side_dir_ != ImGuiDir_None && side_tries_ < 2 && g.NavId == side_from_ && g.NavWindow && !g.NavMoveSubmitted) {
+        ++side_tries_;
+        ImGui::NavMoveRequestSubmit(side_dir_, side_dir_, ImGuiNavMoveFlags_None,
+            ImGuiScrollFlags_KeepVisibleEdgeX | ImGuiScrollFlags_KeepVisibleEdgeY);
+        ImRect from = ImGui::WindowRectRelToAbs(g.NavWindow, g.NavWindow->NavRectRel[g.NavLayer]);
+        if (side_tries_ == 2) {
+            if (const ImGuiWindow* column = column_of(g.NavWindow)) {
+                // From the column's edge, so nothing else in it, like the tick
+                // above the list, comes before the next column.
+                from.Min.x = from.Max.x = side_dir_ == ImGuiDir_Left ? column->Rect().Min.x : column->Rect().Max.x;
+            }
+            // ImGui measures only the middle 60% of the height, which must
+            // still cover the whole window.
+            const float middle = from.GetCenter().y, reach = g.IO.DisplaySize.y * 2;
+            from.Min.y = middle - reach;
+            from.Max.y = middle + reach;
+        }
+        g.NavScoringRect = from;
+    } else {
+        side_dir_ = ImGuiDir_None;
+        side_tries_ = 0;
+        if (g.NavMoveSubmitted && (g.NavMoveDir == ImGuiDir_Left || g.NavMoveDir == ImGuiDir_Right)) {
+            side_dir_ = g.NavMoveDir;
+            side_from_ = g.NavId;
+        }
+    }
+    last_nav_id_ = g.NavId;
+    last_nav_window_ = nav_window;
+}
 
 void default_focus() {
     ImGui::SetItemDefaultFocus();
@@ -192,18 +233,36 @@ void default_focus() {
 }
 
 void begin_row() {
-    const ImGuiID scope = ImGui::GetID("##row_focus");
-    g_row_focused = GImGui->NavFocusScopeId == scope;
-    ImGui::PushFocusScope(scope);
+    g_row_scope = ImGui::GetID("##row_focus");
+    g_row_focused = GImGui->NavFocusScopeId == g_row_scope;
+    ImGui::PushFocusScope(g_row_scope);
 }
 
 void row_buttons() {
+    if (g_row_focused) {
+        ImGuiWindow* window = ImGui::GetCurrentWindow();
+        g_focused_row = {g_row_scope, window->ID, ImGui::WindowRectAbsToRel(window, GImGui->LastItemData.NavRect)};
+    }
     ImGui::PushItemFlag(ImGuiItemFlags_NoNav, !g_row_focused);
 }
 
 void end_row() {
     ImGui::PopItemFlag();
     ImGui::PopFocusScope();
+}
+
+void keep_focus_in_list() {
+    ImGuiContext& g = *GImGui;
+    if (!g.NavMoveScoringItems || (g.NavMoveDir != ImGuiDir_Up && g.NavMoveDir != ImGuiDir_Down)) return;
+    // By the columns the list covers: its rows run on past what it shows.
+    const ImRect list = g.CurrentWindow->Rect();
+    const auto in_list = [&](float x) { return x >= list.Min.x && x <= list.Max.x; };
+    if (!list.Contains(g.NavScoringRect.GetCenter())) return;
+    // Everything around the list has had its chance by now: the rail comes
+    // before the content, and nothing under the list takes the focus.
+    const ImGuiNavItemData& best = g.NavMoveResultLocal.ID ? g.NavMoveResultLocal : g.NavMoveResultOther;
+    if (best.ID && in_list(ImGui::WindowRectRelToAbs(best.Window, best.RectRel).GetCenter().x)) return;
+    ImGui::NavMoveRequestCancel();
 }
 
 void PadFeed::mouse_moved(ImVec2 position) {

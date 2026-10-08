@@ -595,6 +595,7 @@ void installed_page(Launcher& launcher, const Fonts& fonts, ModsPanel& panel, co
         installed_row(fonts, panel, installed, view, position, tall, reorder, request);
     });
     ImGui::EndDisabled();
+    keep_focus_in_list();
     ImGui::EndChild();
     ImGui::TextDisabled("Mods load top to bottom: where two change the same thing, the higher one wins. "
                         "Changes apply the next time Skate starts.");

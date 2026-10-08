@@ -47,11 +47,10 @@ public:
 private:
     bool trackpad_{};
     std::uint16_t buttons_{};
-    float last_tilt_{};
-    int fading_{};        // frames the right stick's tilt only faded
     ImGuiDir side_dir_{ImGuiDir_None};   // a D-pad left or right ImGui looked for last frame
     ImGuiID side_from_{};
-    ImGuiID last_nav_id_{};
+    int side_tries_{};   // how many times it looked again
+    ImGuiID last_nav_id_{}, last_nav_window_{};
     ImGuiKey back_key_{ImGuiKey_Escape};
     bool pointing_{};
     bool clicking_{};   // R3 holds the left button
@@ -71,5 +70,10 @@ void default_focus();
 void begin_row();
 void row_buttons();
 void end_row();
+
+// Call just before a list's EndChild(): up and down from a row stay in the
+// list, so the end of the list holds the focus instead of passing it to
+// whatever lies beyond, like the rail's BACK.
+void keep_focus_in_list();
 
 } // namespace dingosdk::launcher_gui

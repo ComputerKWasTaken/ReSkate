@@ -6,6 +6,7 @@
 #include <imgui_internal.h>
 
 #include <iostream>
+#include <map>
 #include <optional>
 #include <string>
 
@@ -115,13 +116,17 @@ std::string mods_page(PadFeed& feed, const PadState& state) {
     ImGui::SetNextWindowSize(ImVec2(900, 700));
     ImGui::Begin("##page", nullptr, ImGuiWindowFlags_NoDecoration);
     ImGui::SetCursorPos(ImVec2(20, 100));
-    ImGui::BeginChild("##rail", ImVec2(200, 400), ImGuiChildFlags_NavFlattened);
+    ImGui::BeginChild("##rail", ImVec2(200, 520), ImGuiChildFlags_NavFlattened);
     if (ImGui::Button("MY MODS", ImVec2(150, 40))) pressed = "MY MODS";
     dingosdk::launcher_gui::default_focus();
     if (ImGui::Button("GET MODS", ImVec2(150, 40))) pressed = "GET MODS";
+    // BACK at the rail's foot, under the list's last row: the list leaves room
+    // for a line of text below it.
+    ImGui::SetCursorPos(ImVec2(0, 480));
+    if (ImGui::Button("BACK", ImVec2(150, 40))) pressed = "BACK";
     ImGui::EndChild();
     ImGui::SetCursorPos(ImVec2(260, 100));
-    ImGui::BeginChild("##content", ImVec2(600, 500), ImGuiChildFlags_NavFlattened);
+    ImGui::BeginChild("##content", ImVec2(600, 460), ImGuiChildFlags_NavFlattened);
     for (int row = 0; row < 12; ++row) {
         ImGui::PushID(row);
         dingosdk::launcher_gui::begin_row();
@@ -136,6 +141,7 @@ std::string mods_page(PadFeed& feed, const PadState& state) {
         ImGui::SetCursorScreenPos(next);
         ImGui::PopID();
     }
+    dingosdk::launcher_gui::keep_focus_in_list();
     ImGui::EndChild();
     ImGui::End();
     ImGui::Render();
@@ -149,6 +155,85 @@ std::string mods_tap(PadFeed& feed, std::uint16_t button) {
     std::string pressed = mods_page(feed, pad(button_a));
     pressed += mods_page(feed, pad());
     return pressed;
+}
+
+// MY MODS as the launcher draws it at the Steam Deck's scale: the rail with
+// BACK at its foot, a tick above the list for every mod, and rows that carry
+// a tick on the left and a switch and a menu on the right. Returns the name of
+// the item holding the focus.
+std::string my_mods(PadFeed& feed, const PadState& state) {
+    constexpr float k = 0.85f;
+    static std::map<ImGuiID, std::string> names;
+    const auto name = [](const std::string& text) { names[ImGui::GetItemID()] = text; };
+    auto& io = ImGui::GetIO();
+    io.DisplaySize = ImVec2(1227, 716);
+    io.DeltaTime = 1.0f / 60.0f;
+    feed.update(io, state, k);
+    ImGui::NewFrame();
+    feed.after_new_frame();
+    ImGui::SetNextWindowPos(ImVec2(0, 0));
+    ImGui::SetNextWindowSize(io.DisplaySize);
+    ImGui::Begin("##page", nullptr, ImGuiWindowFlags_NoDecoration);
+    ImGui::SetCursorPos(ImVec2(28 * k, 156 * k));
+    ImGui::BeginChild("##rail", ImVec2(236 * k, 716 - 180 * k), ImGuiChildFlags_NavFlattened);
+    ImGui::Button("MY MODS", ImVec2(-1, 56 * k));
+    name("MY MODS");
+    dingosdk::launcher_gui::default_focus();
+    ImGui::Button("GET MODS", ImVec2(-1, 56 * k));
+    name("GET MODS");
+    for (const char* label : {"Install .zip", "Install folder", "Open Mods folder", "Open Thunderstore"}) {
+        ImGui::Button(label, ImVec2(-1, 32 * k));
+        name(label);
+    }
+    ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 38 * k);
+    ImGui::Button("BACK", ImVec2(-1, 34 * k));
+    name("BACK");
+    ImGui::EndChild();
+    ImGui::SetCursorPos(ImVec2(290 * k, 52 * k));
+    ImGui::BeginChild("##content", ImVec2(1227 - 318 * k, 716 - 76 * k), ImGuiChildFlags_NavFlattened);
+    static bool all = false;
+    ImGui::Checkbox("##all", &all);
+    name("tick all");
+    ImGui::Spacing();
+    const float body = ImGui::GetContentRegionAvail().y - ImGui::GetTextLineHeightWithSpacing();
+    ImGui::BeginChild("##mod_list", ImVec2(0, body), ImGuiChildFlags_Borders | ImGuiChildFlags_NavFlattened);
+    const float tall = 68 * k;
+    for (int row = 0; row < 20; ++row) {
+        ImGui::PushID(row);
+        const ImVec2 start = ImGui::GetCursorScreenPos();
+        const float width = ImGui::GetContentRegionAvail().x;
+        dingosdk::launcher_gui::begin_row();
+        ImGui::Selectable("##row", false, ImGuiSelectableFlags_AllowOverlap, ImVec2(width, tall));
+        name("row " + std::to_string(row));
+        const ImVec2 next = ImGui::GetCursorScreenPos();
+        dingosdk::launcher_gui::row_buttons();
+        ImGui::SetCursorScreenPos(ImVec2(start.x + 14 * k, start.y + (tall - ImGui::GetFrameHeight()) * 0.5f));
+        static bool ticks[20];
+        ImGui::Checkbox("##pick", &ticks[row]);
+        name("tick " + std::to_string(row));
+        ImGui::SetCursorScreenPos(ImVec2(start.x + width - 96 * k, start.y + 23 * k));
+        ImGui::Button("##switch", ImVec2(42 * k, 22 * k));
+        name("switch " + std::to_string(row));
+        dingosdk::launcher_gui::end_row();
+        ImGui::SetCursorScreenPos(next);
+        ImGui::PopID();
+    }
+    dingosdk::launcher_gui::keep_focus_in_list();
+    ImGui::EndChild();
+    ImGui::TextDisabled("Mods load top to bottom");
+    ImGui::EndChild();
+    ImGui::End();
+    ImGui::Render();
+    const auto found = names.find(GImGui->NavId);
+    return found == names.end() ? std::string() : found->second;
+}
+
+// One D-pad press, held for a few frames as a thumb does, then let go.
+std::string my_mods_tap(PadFeed& feed, std::uint16_t button) {
+    for (int i = 0; i < 6; ++i) my_mods(feed, pad(button));
+    std::string at;
+    for (int i = 0; i < 6; ++i) at = my_mods(feed, pad());
+    return at;
 }
 
 void fresh() {
@@ -208,6 +293,41 @@ int main() {
         check(mods_tap(feed, dpad_up) == "row " + std::to_string(first), "Up goes to the row above in one press");
         check(mods_tap(feed, dpad_right) == "install " + std::to_string(first), "Right goes to the row's own button");
         check(mods_tap(feed, dpad_up) == "row " + std::to_string(first - 1), "Up from a row's button goes to the row above");
+        for (int i = 0; i < 14; ++i) mods_tap(feed, dpad_down);
+        check(mods_tap(feed, dpad_down) == "row 11", "Down at the end of the list stays on its last row");
+        check(mods_tap(feed, dpad_left) == "BACK", "Left from the end of the list reaches BACK, far below the tabs");
+        mods_tap(feed, dpad_right);
+        for (int i = 0; i < 14; ++i) mods_tap(feed, dpad_up);
+        check(mods_tap(feed, dpad_up) == "row 0", "Up at the top of the list stays on its first row");
+        const auto tab = mods_tap(feed, dpad_left);
+        check(tab == "MY MODS" || tab == "GET MODS", "Left still leaves the list");
+        mods_tap(feed, dpad_down);
+        check(mods_tap(feed, dpad_down) == "BACK", "Down the tabs reaches BACK");
+    }
+    {
+        fresh();
+        ImGui::GetStyle().ScaleAllSizes(0.85f);
+        PadFeed feed;
+        for (int i = 0; i < 3; ++i) my_mods(feed, pad());
+        std::string at = my_mods_tap(feed, dpad_right);
+        for (int i = 0; i < 20 && at != "row 7"; ++i) at = my_mods_tap(feed, dpad_down);
+        check(at == "row 7", "Right and down walk into the rows");
+        check(my_mods_tap(feed, dpad_left) == "tick 7", "Left goes to the row's tick");
+        at = my_mods_tap(feed, dpad_left);
+        check(at != "tick all" && at.rfind("row", 0) != 0 && !at.empty(), "Left from a tick halfway down reaches the rail, not the tick above the list");
+        my_mods_tap(feed, dpad_right);
+        for (int i = 0; i < 3; ++i) my_mods_tap(feed, dpad_down);
+        check(my_mods_tap(feed, dpad_left).rfind("tick ", 0) == 0, "Back on a row's tick");
+        const std::string from = my_mods_tap(feed, dpad_up);
+        check(from.rfind("row ", 0) == 0, "Up from a tick goes to the row above");
+        const int row = std::stoi(from.substr(4));
+        check(my_mods_tap(feed, dpad_up) == "row " + std::to_string(row - 1), "The next up goes to the next row, not to that row's tick");
+        check(my_mods_tap(feed, dpad_right) == "switch " + std::to_string(row - 1), "Right goes to the row's switch");
+        check(my_mods_tap(feed, dpad_down) == "row " + std::to_string(row), "Down from the switch goes to the row below");
+        for (int i = 0; i < 25; ++i) at = my_mods_tap(feed, dpad_down);
+        check(at == "row 19", "Down stops on the last row");
+        my_mods_tap(feed, dpad_left);
+        check(my_mods_tap(feed, dpad_left) == "BACK", "Left from the last row's tick reaches BACK");
     }
     {
         fresh();
@@ -324,19 +444,21 @@ int main() {
         check(!stick.pointing() && ImGui::GetIO().MousePos.x == 400, "The same small tilt of a thumbstick does not");
 
         fresh();
-        PadFeed glide(true);
+        PadFeed slowing(true);
         ImGui::GetIO().AddMousePosEvent(100, 300);
-        frame(glide, pad());
-        for (int i = 0; i < 5; ++i) frame(glide, pad(0, 20000, 0));   // the swipe
+        frame(slowing, pad());
+        for (int i = 0; i < 5; ++i) frame(slowing, pad(0, 20000, 0));   // the swipe
+        const float swiped = ImGui::GetIO().MousePos.x;
         float tilt = 20000;
-        float stopped = 0;
-        for (int i = 0; i < 30; ++i) {   // the thumb lifted: the tilt only fades
+        for (int i = 0; i < 12; ++i) {   // the thumb slows down before it lifts
             tilt *= 0.9f;
-            frame(glide, pad(0, static_cast<std::int16_t>(tilt), 0));
-            if (i == 6) stopped = ImGui::GetIO().MousePos.x;
+            frame(slowing, pad(0, static_cast<std::int16_t>(tilt), 0));
         }
-        frame(glide, pad());
-        check(stopped > 100 && ImGui::GetIO().MousePos.x == stopped, "The trackpad's glide after the thumb lifts does not carry the pointer on");
+        const float slowed = ImGui::GetIO().MousePos.x;
+        frame(slowing, pad(0, -900, -1200));   // lifted: back to Steam's resting tilt
+        frame(slowing, pad(0, -900, -1200));
+        check(slowed > swiped + 60, "A swipe that slows down moves the pointer to its end");
+        check(ImGui::GetIO().MousePos.x == slowed, "The pointer stops when the thumb lifts");
     }
 
     // ------------------------------------------------ trackpad pointer

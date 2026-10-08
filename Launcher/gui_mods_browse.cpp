@@ -578,6 +578,7 @@ void browse_page(Launcher& launcher, const Fonts& fonts, ModsPanel& panel, float
         ImGui::PopID();
     });
     ImGui::EndDisabled();
+    keep_focus_in_list();
     ImGui::EndChild();
 }
 

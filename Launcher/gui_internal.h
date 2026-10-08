@@ -139,7 +139,9 @@ void virtual_rows(int count, Height height, Row row) {
     float y = start.y;
     for (int index = 0; index < count; ++index) {
         const float tall = height(index);
-        if (y + tall >= scroll && y <= scroll + view) {
+        // One row past each edge too: a controller moving off the last row
+        // shown needs the next one there to move to.
+        if (y + 2 * tall >= scroll && y <= scroll + view + tall) {
             ImGui::SetCursorPos(ImVec2(start.x, y));
             row(index, tall);
         }
