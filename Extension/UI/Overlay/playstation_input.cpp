@@ -1,4 +1,5 @@
 #include "playstation_input.h"
+#include "input_capture.h"
 #include "Engine/Core/Log/logging.h"
 #include <Windows.h>
 #include <cfgmgr32.h>
@@ -96,6 +97,7 @@ std::unique_ptr<Pad> open_pad(const std::wstring& path) {
 // Drains every queued report so the newest one wins. Returns false once the
 // device is gone.
 bool drain(Pad& pad) {
+    OverlayInputAccess access; // This independent HID stream belongs to freecam/menu.
     for (int reports = 0; reports < 256; ++reports) {
         if (!pad.pending) {
             ResetEvent(pad.event);

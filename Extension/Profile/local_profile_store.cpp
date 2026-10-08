@@ -146,12 +146,58 @@ void Store::save_district_rank(std::string_view id, std::uint32_t rank) {
 }
 
 
+bool Store::freecam_controller() const {
+    std::lock_guard lock(mutex_);
+    return profile::freecam_controller(value_);
+}
+void Store::save_freecam_controller(bool value) {
+    std::lock_guard lock(mutex_);
+    Update update(*this);
+    update.json(value_.settings, {"options", "freecam_controller"}) = value;
+    update.commit();
+}
+std::uint32_t Store::freecam_controller_binding() const {
+    std::lock_guard lock(mutex_);
+    return profile::freecam_controller_binding(value_);
+}
+void Store::save_freecam_controller_binding(std::uint32_t combo) {
+    require(valid_action_binding(combo), "Unsupported controller combo or keyboard key");
+    std::lock_guard lock(mutex_);
+    Update update(*this);
+    update.json(value_.settings, {"bindings", "freecam_controller"}) = combo;
+    update.commit();
+}
+
+std::uint32_t Store::freecam_binding() const {
+    std::lock_guard lock(mutex_);
+    return profile::freecam_binding(value_);
+}
+void Store::save_freecam_binding(std::uint32_t combo) {
+    require(valid_action_binding(combo), "Unsupported controller combo or keyboard key");
+    std::lock_guard lock(mutex_);
+    Update update(*this);
+    update.json(value_.settings, {"bindings", "freecam"}) = combo;
+    update.commit();
+}
+
+std::uint32_t Store::tp_to_freecam_binding() const {
+    std::lock_guard lock(mutex_);
+    return profile::tp_to_freecam_binding(value_);
+}
+void Store::save_tp_to_freecam_binding(std::uint32_t combo) {
+    require(valid_action_binding(combo), "Unsupported controller combo or keyboard key");
+    std::lock_guard lock(mutex_);
+    Update update(*this);
+    update.json(value_.settings, {"bindings", "tp_to_freecam"}) = combo;
+    update.commit();
+}
+
 std::uint32_t Store::noclip_binding() const {
     std::lock_guard lock(mutex_);
     return profile::noclip_binding(value_);
 }
 void Store::save_noclip_binding(std::uint32_t combo) {
-    require(valid_controller_combo(combo), "Unsupported controller combo");
+    require(valid_action_binding(combo), "Unsupported controller combo or keyboard key");
     std::lock_guard lock(mutex_);
     Update update(*this);
     update.json(value_.settings, {"bindings", "noclip"}) = combo;
@@ -164,10 +210,22 @@ std::uint32_t Store::forward_velocity_binding() const {
     return profile::forward_velocity_binding(value_);
 }
 void Store::save_forward_velocity_binding(std::uint32_t combo) {
-    require(valid_controller_combo(combo), "Unsupported controller combo");
+    require(valid_action_binding(combo), "Unsupported controller combo or keyboard key");
     std::lock_guard lock(mutex_);
     Update update(*this);
     update.json(value_.settings, {"bindings", "forward_velocity"}) = combo;
+    update.commit();
+}
+
+std::uint32_t Store::offboard_up_velocity_binding() const {
+    std::lock_guard lock(mutex_);
+    return profile::offboard_up_velocity_binding(value_);
+}
+void Store::save_offboard_up_velocity_binding(std::uint32_t combo) {
+    require(valid_action_binding(combo), "Unsupported controller combo or keyboard key");
+    std::lock_guard lock(mutex_);
+    Update update(*this);
+    update.json(value_.settings, {"bindings", "offboard_up_velocity"}) = combo;
     update.commit();
 }
 
@@ -176,7 +234,7 @@ std::uint32_t Store::up_velocity_binding() const {
     return profile::up_velocity_binding(value_);
 }
 void Store::save_up_velocity_binding(std::uint32_t combo) {
-    require(valid_controller_combo(combo), "Unsupported controller combo");
+    require(valid_action_binding(combo), "Unsupported controller combo or keyboard key");
     std::lock_guard lock(mutex_);
     Update update(*this);
     update.json(value_.settings, {"bindings", "up_velocity"}) = combo;
