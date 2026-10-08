@@ -5,6 +5,7 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 
+#include <cmath>
 #include <iostream>
 #include <map>
 #include <optional>
@@ -432,13 +433,13 @@ int main() {
         PadFeed stick;
         PadFeed trackpad(true);
         ImGui::GetIO().AddMousePosEvent(400, 300);
-        frame(trackpad, pad());
+        for (int i = 0; i < 20; ++i) frame(trackpad, pad());   // it settles first
         for (int i = 0; i < 10; ++i) frame(trackpad, pad(0, 3300, 0));   // a slow swipe
         frame(trackpad, pad());
         check(ImGui::GetIO().MousePos.x > 405, "A slow swipe on the trackpad moves the pointer");
         fresh();
         ImGui::GetIO().AddMousePosEvent(400, 300);
-        frame(stick, pad());
+        for (int i = 0; i < 20; ++i) frame(stick, pad());
         for (int i = 0; i < 10; ++i) frame(stick, pad(0, 3300, 0));
         frame(stick, pad());
         check(!stick.pointing() && ImGui::GetIO().MousePos.x == 400, "The same small tilt of a thumbstick does not");
@@ -446,7 +447,7 @@ int main() {
         fresh();
         PadFeed slowing(true);
         ImGui::GetIO().AddMousePosEvent(100, 300);
-        frame(slowing, pad());
+        for (int i = 0; i < 20; ++i) frame(slowing, pad());
         for (int i = 0; i < 5; ++i) frame(slowing, pad(0, 20000, 0));   // the swipe
         const float swiped = ImGui::GetIO().MousePos.x;
         float tilt = 20000;
@@ -459,6 +460,21 @@ int main() {
         frame(slowing, pad(0, -900, -1200));
         check(slowed > swiped + 60, "A swipe that slows down moves the pointer to its end");
         check(ImGui::GetIO().MousePos.x == slowed, "The pointer stops when the thumb lifts");
+
+        fresh();
+        PadFeed drifting(true);
+        ImGui::GetIO().AddMousePosEvent(400, 300);
+        for (int i = 0; i < 60; ++i) frame(drifting, pad(0, -2600, -2600));   // resting off the middle
+        check(!drifting.pointing() && ImGui::GetIO().MousePos.x == 400 && ImGui::GetIO().MousePos.y == 300,
+              "A trackpad resting off the middle does not move the pointer");
+        for (int i = 0; i < 10; ++i) frame(drifting, pad(0, 9000, -2600));
+        check(drifting.pointing() && ImGui::GetIO().MousePos.x > 420 && std::abs(ImGui::GetIO().MousePos.y - 300) < 1,
+              "A swipe moves it from where the trackpad rests");
+        for (int i = 0; i < 60; ++i) frame(drifting, pad(0, -1000, 1500));   // lifted: resting somewhere new
+        const ImVec2 rested = ImGui::GetIO().MousePos;
+        for (int i = 0; i < 60; ++i) frame(drifting, pad(0, -1000, 1500));
+        check(ImGui::GetIO().MousePos.x == rested.x && ImGui::GetIO().MousePos.y == rested.y,
+              "After a touch it rests again without the pointer creeping");
     }
 
     // ------------------------------------------------ trackpad pointer
@@ -468,7 +484,7 @@ int main() {
         auto& io = ImGui::GetIO();
         io.AddMousePosEvent(400, 300);
         feed.mouse_moved(ImVec2(400, 300));
-        frame(feed, pad());
+        for (int i = 0; i < 20; ++i) frame(feed, pad());
         frame(feed, pad(0, 3000, 0));
         check(!feed.pointing() && io.MousePos.x == 400, "A thumb resting near the middle does not move the pointer");
 

@@ -54,6 +54,10 @@ private:
     ImGuiKey back_key_{ImGuiKey_Escape};
     bool pointing_{};
     bool clicking_{};   // R3 holds the left button
+    ImVec2 rest_{};     // where the right stick rests
+    bool rest_known_{};
+    float steady_{};    // seconds the right stick held still
+    float last_x_{}, last_y_{};
     ImVec2 pointer_{};
     ImVec2 mouse_{-1, -1};   // where the last mouse move was
 };

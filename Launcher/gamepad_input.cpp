@@ -41,6 +41,12 @@ constexpr PointerFeel stick_feel{0.2f, 1400.0f, true};
 // tilt drops back to rest the moment the thumb lifts. Small swipes must move
 // the pointer and a quick one must cross the window.
 constexpr PointerFeel trackpad_feel{0.06f, 2600.0f, false};
+// The right stick never rests quite at the middle, and Steam's trackpad rests
+// a little off it too, somewhere new after each touch. A reading that holds
+// this still, this near the middle, for this long is where it rests.
+constexpr float rest_jitter = 0.01f;
+constexpr float rest_limit = 0.12f;
+constexpr float rest_seconds = 0.3f;
 // A mouse move this close to the last one is the same place reported again.
 constexpr float pointer_slack = 2.0f;
 
@@ -105,9 +111,24 @@ void PadFeed::update(ImGuiIO& io, const PadState& input, float scale) {
     if (pressed & focus_bits) pointing_ = false;
 
     const PointerFeel& feel = trackpad_ ? trackpad_feel : stick_feel;
-    const float x = axis(pad.right_x), y = -axis(pad.right_y);   // screen Y grows downward
+    const float raw_x = axis(pad.right_x), raw_y = -axis(pad.right_y);   // screen Y grows downward
+    if (std::abs(raw_x - last_x_) < rest_jitter && std::abs(raw_y - last_y_) < rest_jitter &&
+        std::sqrt(raw_x * raw_x + raw_y * raw_y) < rest_limit) {
+        steady_ += io.DeltaTime;
+        if (steady_ >= rest_seconds) {
+            rest_ = ImVec2(raw_x, raw_y);
+            rest_known_ = true;
+        }
+    } else {
+        steady_ = 0;
+    }
+    last_x_ = raw_x;
+    last_y_ = raw_y;
+    // Measured from where it rests, and not at all until that is known: a
+    // pointer creeping off on its own would take the screen from the focus.
+    const float x = raw_x - rest_.x, y = raw_y - rest_.y;
     const float tilt = std::min(1.0f, std::sqrt(x * x + y * y));
-    const bool steering = tilt > feel.dead_zone;
+    const bool steering = rest_known_ && tilt > feel.dead_zone;
     // The first R3 only shows the pointer: a stray click must not press
     // whatever the mouse last rested on.
     const bool click = pointing_ && (pressed & right_thumb);
