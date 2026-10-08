@@ -164,7 +164,7 @@ namespace {
 
 // The list row holding the focus, as it was last drawn.
 struct FocusedRow {
-    ImGuiID scope{}, window{};
+    ImGuiID scope{}, window{}, item{};
     ImRect rect;   // relative to its window
 };
 FocusedRow g_focused_row;
@@ -262,7 +262,8 @@ void begin_row() {
 void row_buttons() {
     if (g_row_focused) {
         ImGuiWindow* window = ImGui::GetCurrentWindow();
-        g_focused_row = {g_row_scope, window->ID, ImGui::WindowRectAbsToRel(window, GImGui->LastItemData.NavRect)};
+        g_focused_row = {g_row_scope, window->ID, GImGui->LastItemData.ID,
+                         ImGui::WindowRectAbsToRel(window, GImGui->LastItemData.NavRect)};
     }
     ImGui::PushItemFlag(ImGuiItemFlags_NoNav, !g_row_focused);
 }
@@ -272,13 +273,36 @@ void end_row() {
     ImGui::PopFocusScope();
 }
 
+void hold_focus(bool covered) {
+    static struct {
+        bool held{};
+        ImGuiID id{}, window{};
+        bool shown{};
+    } held;
+    ImGuiContext& g = *GImGui;
+    if (covered && !held.held) {
+        const bool in_row = g_focused_row.scope && g.NavFocusScopeId == g_focused_row.scope;
+        held = {true, in_row ? g_focused_row.item : g.NavId,
+                in_row ? g_focused_row.window : g.NavWindow ? g.NavWindow->ID : 0,
+                g.NavCursorVisible && g.NavHighlightItemUnderNav};
+    } else if (!covered && held.held) {
+        held.held = false;
+        ImGuiWindow* window = ImGui::FindWindowByID(held.window);
+        if (!held.id || !window) return;
+        ImGui::SetFocusID(held.id, window);
+        g.NavCursorVisible = g.NavHighlightItemUnderNav = held.shown;
+    }
+}
+
 void keep_focus_in_list() {
     ImGuiContext& g = *GImGui;
     if (!g.NavMoveScoringItems || (g.NavMoveDir != ImGuiDir_Up && g.NavMoveDir != ImGuiDir_Down)) return;
     // By the columns the list covers: its rows run on past what it shows.
     const ImRect list = g.CurrentWindow->Rect();
     const auto in_list = [&](float x) { return x >= list.Min.x && x <= list.Max.x; };
-    if (!list.Contains(g.NavScoringRect.GetCenter())) return;
+    // The focus is in the list itself, or in a panel inside it.
+    ImGuiWindow* window = g.CurrentWindow;
+    if (!g.NavWindow || !(g.NavWindow == window || ImGui::IsWindowChildOf(g.NavWindow, window, false))) return;
     // Everything around the list has had its chance by now: the rail comes
     // before the content, and nothing under the list takes the focus.
     const ImGuiNavItemData& best = g.NavMoveResultLocal.ID ? g.NavMoveResultLocal : g.NavMoveResultOther;

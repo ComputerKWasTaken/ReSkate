@@ -103,6 +103,9 @@ std::string press(PadFeed& feed, std::uint16_t button) {
     return pressed.empty() ? released : pressed;
 }
 
+// The install progress, drawn over the Mod manager while this is set.
+bool g_installing = false;
+
 // The Mod manager's layout: a rail of tabs beside a list whose rows carry
 // buttons, the rail's tiles level with the gaps between rows.
 std::string mods_page(PadFeed& feed, const PadState& state) {
@@ -116,6 +119,10 @@ std::string mods_page(PadFeed& feed, const PadState& state) {
     ImGui::SetNextWindowPos(ImVec2(0, 0));
     ImGui::SetNextWindowSize(ImVec2(900, 700));
     ImGui::Begin("##page", nullptr, ImGuiWindowFlags_NoDecoration);
+    dingosdk::launcher_gui::hold_focus(g_installing);
+    // The window's own buttons come first on the page, as in the launcher.
+    ImGui::SetCursorPos(ImVec2(866, 0));
+    if (ImGui::Button("_", ImVec2(30, 30))) pressed = "minimise";
     ImGui::SetCursorPos(ImVec2(20, 100));
     ImGui::BeginChild("##rail", ImVec2(200, 520), ImGuiChildFlags_NavFlattened);
     if (ImGui::Button("MY MODS", ImVec2(150, 40))) pressed = "MY MODS";
@@ -145,6 +152,15 @@ std::string mods_page(PadFeed& feed, const PadState& state) {
     dingosdk::launcher_gui::keep_focus_in_list();
     ImGui::EndChild();
     ImGui::End();
+    if (g_installing) {
+        ImGui::SetNextWindowPos(ImVec2(0, 0));
+        ImGui::SetNextWindowSize(io.DisplaySize);
+        ImGui::SetNextWindowFocus();
+        ImGui::Begin("##installing", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground);
+        ImGui::SetCursorPos(ImVec2(400, 400));
+        if (ImGui::Button("CANCEL")) pressed = "cancel";
+        ImGui::End();
+    }
     ImGui::Render();
     return pressed;
 }
@@ -304,6 +320,18 @@ int main() {
         check(tab == "MY MODS" || tab == "GET MODS", "Left still leaves the list");
         mods_tap(feed, dpad_down);
         check(mods_tap(feed, dpad_down) == "BACK", "Down the tabs reaches BACK");
+
+        // INSTALL on a row, then the install progress over the page until it is done.
+        mods_tap(feed, dpad_up);
+        mods_tap(feed, dpad_right);
+        check(mods_tap(feed, dpad_right).rfind("install ", 0) == 0, "On a row's INSTALL");
+        const int installed = std::stoi(mods_tap(feed, 0).substr(8));
+        g_installing = true;
+        for (int i = 0; i < 10; ++i) mods_page(feed, pad());
+        g_installing = false;
+        for (int i = 0; i < 3; ++i) mods_page(feed, pad());
+        check(GImGui->NavCursorVisible, "The focus shows again once the install is done");
+        check(mods_tap(feed, 0) == "row " + std::to_string(installed), "The focus goes back to the installed mod's row");
     }
     {
         fresh();

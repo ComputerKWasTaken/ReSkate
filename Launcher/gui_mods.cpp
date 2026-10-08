@@ -1001,6 +1001,7 @@ void mods_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, Ui& ui, Mo
     pump_icons(panel);
     auto* draw = ImGui::GetWindowDrawList();
     const bool installing = panel.installing;
+    hold_focus(installing);
     auto& entries = panel.list.entries;
     const auto installed = installed_versions(panel.list);
     const auto pending = updates(panel.store, installed);

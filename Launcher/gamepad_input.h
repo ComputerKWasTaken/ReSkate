@@ -75,6 +75,12 @@ void begin_row();
 void row_buttons();
 void end_row();
 
+// Call once a frame, after the page's Begin, with whether a window over the
+// page holds the focus, like the install progress. When it goes, the focus
+// goes back to where it was, or to its list row: the button pressed may be
+// gone by then, an INSTALL turned INSTALLED.
+void hold_focus(bool covered);
+
 // Call just before a list's EndChild(): up and down from a row stay in the
 // list, so the end of the list holds the focus instead of passing it to
 // whatever lies beyond, like the rail's BACK.

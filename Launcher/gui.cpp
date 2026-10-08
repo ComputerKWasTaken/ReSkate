@@ -33,6 +33,9 @@ void keep_in_front(const char* id) {
     const ImGuiWindow* window = ImGui::FindWindowByName(id);
     const ImGuiWindow* focused = GImGui->NavWindow;
     if (window && focused && focused->RootWindow == window) return;
+    // The install progress covers the Mods page and holds the focus; taking it
+    // back every frame would flash the page's own default item.
+    if (focused && focused->RootWindow == ImGui::FindWindowByName("##installing")) return;
     ImGui::SetNextWindowFocus();
 }
 
