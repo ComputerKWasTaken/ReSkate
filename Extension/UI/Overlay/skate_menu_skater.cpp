@@ -18,6 +18,19 @@ void camera_controls(SkateMenu& menu, const Model& model, const CallbacksV3& cal
     if (toggle_row(menu, "Freecam", "Detach the camera and explore.", flight,
             debug.available && debug.camera_available && callbacks.queue_debug))
         debug_request(menu, callbacks, {DebugAction::set_free_camera, flight});
+    bool freecam_controller = model.bindings.freecam_controller;
+    if (toggle_row(menu, "Block Input(Enable Controller Support)", "Block player input and use the controller for the Freecam.", freecam_controller,
+            model.bindings.available && callbacks.queue_debug)) {
+        std::array<char, 512> result{};
+        callbacks.queue_console_command(callbacks.user, freecam_controller ? "freecam_controller true" : "freecam_controller false", result.data(), result.size());
+    }
+    field(menu, "Teleport to Freecam");
+    ImGui::BeginDisabled(!debug.free_camera || !debug.camera_position_valid || !callbacks.queue_console_command);
+    if (ImGui::Button("Teleport", ImVec2(-1, 0))) {
+        std::array<char, 512> result{};
+        callbacks.queue_console_command(callbacks.user, "tp_to_freecam", result.data(), result.size());
+    }
+    ImGui::EndDisabled();
     {
         field(menu, "Field of view");
         const bool custom = debug.free_camera_fov > 0;
@@ -126,6 +139,10 @@ void movement_controls(SkateMenu& menu, const Model& model, const CallbacksV3& c
     float up_velocity = debug.up_velocity_speed;
     if (ImGui::SliderFloat("##up-velocity", &up_velocity, 1.0f, 25.0f, "+%.1f", ImGuiSliderFlags_AlwaysClamp))
         debug_request(menu, callbacks, {DebugAction::set_up_velocity_speed, false, up_velocity});
+    field(menu, "Off-board up boost");
+    float offboard_up_velocity = debug.offboard_up_velocity_speed;
+    if (ImGui::SliderFloat("##offboard-up-velocity", &offboard_up_velocity, 1.0f, 25.0f, "+%.1f", ImGuiSliderFlags_AlwaysClamp))
+        debug_request(menu, callbacks, {DebugAction::set_offboard_up_velocity_speed, false, offboard_up_velocity});
     ImGui::EndDisabled();
     note("Controller: left stick moves, right stick looks, RT / LT rise and fall, click the left stick to boost.");
     note("Keyboard: WASD / Q E, Shift to boost. Close the menu to fly.");
