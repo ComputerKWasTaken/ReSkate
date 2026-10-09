@@ -92,7 +92,7 @@ ImU32 name_colour(const MultiplayerChatLine& line) {
 
 // A message's own colour: the server's lines in lavender, everyone else's white.
 ImU32 text_colour(const MultiplayerChatLine& line) {
-    return line.server ? multiplayer::nametag_server_text : theme::paper;
+    return line.text_color ? line.text_color : line.server ? multiplayer::nametag_server_text : theme::paper;
 }
 
 // "name:"; a role tag is drawn in its own box before it (role_badge.h).

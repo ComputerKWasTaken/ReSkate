@@ -108,6 +108,9 @@ struct MultiplayerChatLine {
     // the overlay can keep emote names the filter caught; empty when nothing was masked.
     std::string unmasked;
     bool server{}; // said by the dedicated server itself: its console, welcome or answers
+    // The colour of the line's own text when it is not the usual one (IM_COL32 layout, 0 = usual):
+    // a dedicated server's lines, in the colour its owner chose.
+    std::uint32_t text_color{};
 };
 // A command typed into chat with a leading "/" (shown as the player types "/").
 struct MultiplayerChatCommand {
