@@ -9,15 +9,20 @@ ControllerBindingsModel local_profile_controller_bindings() {
     ControllerBindingsModel result;
     result.status = binding_feedback;
     if (!s.active || !s.store) return result;
+    result.freecam_controller = s.store->freecam_controller();
+    result.freecam_controller_combo = s.store->freecam_controller_binding();
+    result.freecam_combo = s.store->freecam_binding();
+    result.tp_to_freecam_combo = s.store->tp_to_freecam_binding();
     result.noclip_combo = s.store->noclip_binding();
     result.forward_velocity_combo = s.store->forward_velocity_binding();
     result.up_velocity_combo = s.store->up_velocity_binding();
+    result.offboard_up_velocity_combo = s.store->offboard_up_velocity_binding();
     result.available = true;
     return result;
 }
 bool set_local_noclip_binding(std::uint32_t combo) {
     auto& s = local_runtime(); std::lock_guard lock(s.native_mutex);
-    if (!s.active || !s.store || !valid_controller_combo(combo)) return false;
+    if (!s.active || !s.store || !valid_action_binding(combo)) return false;
     try {
         s.store->save_noclip_binding(combo);
         binding_feedback = combo ? "Noclip binding saved." : "Noclip binding cleared.";
@@ -26,9 +31,55 @@ bool set_local_noclip_binding(std::uint32_t combo) {
     } catch (...) { binding_feedback = "Could not save the binding. See the console log."; return false; }
 }
 
+bool local_freecam_controller() {
+    auto& s = local_runtime(); std::lock_guard lock(s.native_mutex);
+    return s.active && s.store && s.store->freecam_controller();
+}
+bool set_local_freecam_controller(bool value) {
+    auto& s = local_runtime(); std::lock_guard lock(s.native_mutex);
+    if (!s.active || !s.store) return false;
+    try {
+        s.store->save_freecam_controller(value);
+        return true;
+    } catch (...) { return false; }
+}
+
+bool set_local_freecam_controller_binding(std::uint32_t combo) {
+    auto& s = local_runtime(); std::lock_guard lock(s.native_mutex);
+    if (!s.active || !s.store || !valid_action_binding(combo)) return false;
+    try {
+        s.store->save_freecam_controller_binding(combo);
+        binding_feedback = combo ? "Freecam Controller binding saved." : "Freecam Controller binding cleared.";
+        dingosdk::logging::event(dingosdk::logging::Channel::profile, dingosdk::Json{{"event","controller_binding_saved"},{"action","freecam_controller"},{"combo",combo}}.dump().c_str());
+        return true;
+    } catch (...) { binding_feedback = "Could not save the binding. See the console log."; return false; }
+}
+
+bool set_local_freecam_binding(std::uint32_t combo) {
+    auto& s = local_runtime(); std::lock_guard lock(s.native_mutex);
+    if (!s.active || !s.store || !valid_action_binding(combo)) return false;
+    try {
+        s.store->save_freecam_binding(combo);
+        binding_feedback = combo ? "Freecam binding saved." : "Freecam binding cleared.";
+        dingosdk::logging::event(dingosdk::logging::Channel::profile, dingosdk::Json{{"event","controller_binding_saved"},{"action","freecam"},{"combo",combo}}.dump().c_str());
+        return true;
+    } catch (...) { binding_feedback = "Could not save the binding. See the console log."; return false; }
+}
+
+bool set_local_tp_to_freecam_binding(std::uint32_t combo) {
+    auto& s = local_runtime(); std::lock_guard lock(s.native_mutex);
+    if (!s.active || !s.store || !valid_action_binding(combo)) return false;
+    try {
+        s.store->save_tp_to_freecam_binding(combo);
+        binding_feedback = combo ? "TP to Freecam binding saved." : "TP to Freecam binding cleared.";
+        dingosdk::logging::event(dingosdk::logging::Channel::profile, dingosdk::Json{{"event","controller_binding_saved"},{"action","tp_to_freecam"},{"combo",combo}}.dump().c_str());
+        return true;
+    } catch (...) { binding_feedback = "Could not save the binding. See the console log."; return false; }
+}
+
 bool set_local_forward_velocity_binding(std::uint32_t combo) {
     auto& s = local_runtime(); std::lock_guard lock(s.native_mutex);
-    if (!s.active || !s.store || !valid_controller_combo(combo)) return false;
+    if (!s.active || !s.store || !valid_action_binding(combo)) return false;
     try {
         s.store->save_forward_velocity_binding(combo);
         binding_feedback = combo ? "Forward Boost binding saved." : "Forward Boost binding cleared.";
@@ -37,9 +88,20 @@ bool set_local_forward_velocity_binding(std::uint32_t combo) {
     } catch (...) { binding_feedback = "Could not save the binding. See the console log."; return false; }
 }
 
+bool set_local_offboard_up_velocity_binding(std::uint32_t combo) {
+    auto& s = local_runtime(); std::lock_guard lock(s.native_mutex);
+    if (!s.active || !s.store || !valid_action_binding(combo)) return false;
+    try {
+        s.store->save_offboard_up_velocity_binding(combo);
+        binding_feedback = combo ? "Off-board Up Boost binding saved." : "Off-board Up Boost binding cleared.";
+        dingosdk::logging::event(dingosdk::logging::Channel::profile, dingosdk::Json{{"event","controller_binding_saved"},{"action","offboard_up_velocity"},{"combo",combo}}.dump().c_str());
+        return true;
+    } catch (...) { binding_feedback = "Could not save the binding. See the console log."; return false; }
+}
+
 bool set_local_up_velocity_binding(std::uint32_t combo) {
     auto& s = local_runtime(); std::lock_guard lock(s.native_mutex);
-    if (!s.active || !s.store || !valid_controller_combo(combo)) return false;
+    if (!s.active || !s.store || !valid_action_binding(combo)) return false;
     try {
         s.store->save_up_velocity_binding(combo);
         binding_feedback = combo ? "Up Boost binding saved." : "Up Boost binding cleared.";
@@ -62,8 +124,27 @@ std::optional<bool> local_preference(std::string_view key) noexcept {
 void set_local_preference(std::string_view key, bool value) noexcept {
     try {
         auto& s = local_runtime();
-        if (s.store) s.store->set_user_value("ReSkate." + std::string(key), value);
-    } catch (...) { /* Saving is best effort; the runtime value already applied. */ }
+        if (!s.store) {
+            dingosdk::logging::event(dingosdk::logging::Channel::profile,
+                "{\"event\":\"local_preference_save_failed\",\"reason\":\"profile_unavailable\"}");
+            return;
+        }
+        const auto full_key = "ReSkate." + std::string(key);
+        s.store->set_user_value(full_key, value);
+        const auto saved = s.store->user_value(full_key);
+        if (!saved || !saved->is_boolean() || saved->get<bool>() != value) {
+            dingosdk::logging::event(dingosdk::logging::Channel::profile,
+                dingosdk::Json{{"event", "local_preference_save_failed"},
+                    {"key", full_key}, {"reason", "readback_mismatch"}}.dump().c_str());
+            return;
+        }
+        dingosdk::logging::event(dingosdk::logging::Channel::profile,
+            dingosdk::Json{{"event", "local_preference_saved"},
+                {"key", full_key}, {"value", value}}.dump().c_str());
+    } catch (...) {
+        dingosdk::logging::event(dingosdk::logging::Channel::profile,
+            "{\"event\":\"local_preference_save_failed\",\"reason\":\"exception\"}");
+    }
 }
 
 std::optional<Json> local_value(std::string_view key) noexcept {

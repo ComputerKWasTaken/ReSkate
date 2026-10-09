@@ -1,4 +1,5 @@
 #include "session_internal.h"
+#include "Extension/Multiplayer/Steam/steam_social.h"
 #include "Extension/Multiplayer/Hud/native_indicators.h"
 #include "Extension/Multiplayer/Hud/native_player_ui.h"
 #include "Extension/Multiplayer/Hud/custom_nametags.h"
@@ -12,6 +13,7 @@
 #include <cmath>
 #include <cstdio>
 #include <charconv>
+#include <sstream>
 #include <stdexcept>
 #include <ctime>
 
@@ -25,15 +27,23 @@ void apply_distances(Session &s, const MultiplayerDistances &distances) {
     // previous band's hysteresis or waiting for its old send deadline.
     for (auto &peer : active_peers(s)) peer.pose_delivery = {};
 }
+void apply_object_limit(Session &s, unsigned limit) {
+    s.object_limit = limit;
+    set_lobby_object_limit(s.mode == Mode::host || s.server_admin ? 0 : limit);
+}
 void apply_object_placement(Session &s, ObjectPlacement policy) {
     s.object_placement = policy;
     // On a dedicated server "host only" means its admins.
     set_lobby_object_placement_allowed(object_placement_allowed(policy, s.mode == Mode::host || s.server_admin));
 }
 void apply_nametags(const Session &s) {
-    set_custom_nametags_enabled(s.nametags && s.custom_nametags);
-    set_native_nametags_enabled(s.nametags && !s.custom_nametags);
-    set_native_compass_enabled(!(s.nametags && s.custom_nametags));
+    // The feed also runs when only chat bubbles are on: the overlay draws whichever of the
+    // two is enabled from the flags it is handed.
+    // Nametags are ReSkate's own (Hud/custom_nametags.h); the game's are never shown. Its
+    // compass comes back when they are off, since they are what points at the other players.
+    set_custom_nametags_enabled(s.nametags || s.chat_bubbles);
+    set_native_nametags_enabled(false);
+    set_native_compass_enabled(!s.nametags);
 }
 void apply_guest_tools(Session &s, bool noclip, bool no_bail, bool boosts) {
     s.guest_noclip = noclip;
@@ -113,9 +123,8 @@ std::string party_command(Session &s, std::string_view argument) {
         return p ? peer_name(s, *p) : s.transport.name(id);
     };
     if (verb.empty() || verb == "status" || verb == "list") {
-        if (!s.local_party) return dedicated_host(s) ? "You're not in a party. Invite a player from their player card or with: party invite <name>."
-                                                     : "You're the only one in this lobby.";
-        std::string text = std::string(dedicated_host(s) ? "Your party" : "Your lobby's party") + (s.local_party_open ? " (open):" : ":");
+        if (!s.local_party) return "You're not in a party. Invite a player from their player card or with: party invite <name>.";
+        std::string text = std::string("Your party") + (s.local_party_open ? " (open):" : ":");
         const auto local = s.transport.status().local_id;
         text += " " + s.transport.name(local) + (s.local_party_leader ? " (leader)" : "");
         for (const auto &peer : active_peers(s))
@@ -123,7 +132,6 @@ std::string party_command(Session &s, std::string_view argument) {
                 text += ", " + peer_name(s, peer) + (peer.member.party_leader ? " (leader)" : "");
         return text;
     }
-    if (!dedicated_host(s)) return "Everyone in a lobby is in one party with the host.";
     static constexpr std::pair<std::string_view, PartyAction> verbs[] = {
         {"invite", PartyAction::invite}, {"accept", PartyAction::accept}, {"decline", PartyAction::decline},
         {"join", PartyAction::join},     {"leave", PartyAction::leave},   {"kick", PartyAction::kick},
@@ -286,6 +294,21 @@ std::string edit_object_placement(Session &s, std::string_view argument) {
          : *policy == ObjectPlacement::host_only ? "Only you can place objects. Guests' objects are frozen."
                                                  : "Object placement is disabled for everyone. Existing objects stay.";
 }
+std::string edit_object_limit(Session &s, std::string_view argument) {
+    if (s.mode != Mode::host) return "Only the session host can change the object limit.";
+    const auto limit = parse_object_limit(argument);
+    if (!limit) return "Use a number of objects from 1 to " + std::to_string(max_object_limit) + ", or off.";
+    // Guests' games stop them at the limit when the roster arrives; enforcement is the host
+    // showing everyone no more than that of each guest's layout (publish_guest_objects).
+    apply_object_limit(s, *limit);
+    for (auto &peer : active_peers(s)) peer.shared_from = 0; // look at every layout again
+    s.roster_dirty = true;
+    load_host_preferences(s);
+    s.host_preferences.object_limit = *limit;
+    save_host_preferences(s);
+    return *limit ? "Each guest can place up to " + std::to_string(*limit) + " objects."
+                  : std::string("Guests can place as many objects as they like.");
+}
 // Removes every guest's objects for everyone, whatever the placement policy.
 // The host's own objects are its saved park and are left alone.
 std::string clear_guest_objects(Session &s, std::string_view) {
@@ -307,16 +330,6 @@ std::string clear_guest_objects(Session &s, std::string_view) {
     return removed ? "Deleted " + std::to_string(removed) + " guest object" + (removed == 1 ? "" : "s") + "."
                    : "Guests have no placed objects to delete.";
 }
-std::string edit_party_overlay(Session &s, std::string_view argument) {
-    const auto enabled = parse_switch(argument, s.party_overlay);
-    if (!enabled) return "Use on, off, or toggle for the lobby party.";
-    s.party_overlay = *enabled;
-    s.display_preferences_loaded = true;
-    profile_runtime::set_local_preference("LobbyParty", s.party_overlay);
-    s.roster_dirty = true;
-    return s.party_overlay ? "Lobby party on: everyone in a lobby is in your game's party."
-                           : "Lobby party off: lobby players are not shown as your game's party.";
-}
 std::string edit_nametags(Session &s, std::string_view argument) {
     const auto enabled = parse_switch(argument, s.nametags);
     if (!enabled) return "Use on, off, or toggle for peer nametags.";
@@ -326,15 +339,51 @@ std::string edit_nametags(Session &s, std::string_view argument) {
     profile_runtime::set_local_preference("Nametags", s.nametags);
     return s.nametags ? "Peer nametags shown." : "Peer nametags hidden.";
 }
-std::string edit_nametag_style(Session &s, std::string_view argument) {
-    const auto custom = argument == "reskate" ? std::optional<bool>(true) : argument == "game" ? std::optional<bool>(false)
-                                                                          : parse_switch(argument, s.custom_nametags);
-    if (!custom) return "Use reskate, game, or toggle for the nametag style.";
-    s.custom_nametags = *custom;
-    s.display_preferences_loaded = true;
-    apply_nametags(s);
-    profile_runtime::set_local_preference("CustomNametags", s.custom_nametags);
-    return s.custom_nametags ? "ReSkate nametags: names, distances and dots." : "The game's own nametags.";
+// The Special page: a player on one of the backend's lists going without their tag, or
+// without the animation on their items. Their next appearance packet tells everyone
+// (session_send.cpp).
+std::string edit_own_tag(Session &, std::string_view argument) {
+    const auto shown = parse_switch(argument, own_tag_shown());
+    if (!shown) return "Use on, off, or toggle for your tag.";
+    show_own_tag(*shown);
+    profile_runtime::set_local_preference("IdentityTag", *shown);
+    return *shown ? "Your tag shows." : "Your tag is hidden, for you and everyone you skate with.";
+}
+std::string edit_own_items(Session &, std::string_view argument) {
+    const auto shown = parse_switch(argument, own_items_shown());
+    if (!shown) return "Use on, off, or toggle for your items.";
+    show_own_items(*shown);
+    profile_runtime::set_local_preference("IdentityItems", *shown);
+    return *shown ? "Your items animate." : "Your items are plain, for you and everyone you skate with.";
+}
+// The Special page: how one of the player's marked cosmetics is coloured, as
+// "<cosmetic> <mode> <rrggbb> <rrggbb> <speed>" (MarkStyle). It goes out with their next
+// appearance packet and is kept in their profile.
+std::string edit_mark_style(Session &, std::string_view argument) {
+    std::istringstream in{std::string(argument)};
+    unsigned item{}, mode{}, from{}, to{}, speed{};
+    if (!(in >> item >> mode >> std::hex >> from >> to >> std::dec >> speed) || item >= mark_items || mode > 4 ||
+        from > 0xffffff || to > 0xffffff || speed > 2)
+        return "That is not a cosmetic style.";
+    // Mode 4, the rainbow, is the staff's to pick (a developer's standard is it already). It is
+    // kept, and sent, as a solid colour older builds can show (rainbow_style).
+    const auto social = steam_social_snapshot();
+    const auto mark = social ? identity_mark(social->local.id) : std::nullopt;
+    if (mode == 4 && mark != IdentityList::staff) return "The rainbow is not one of your styles.";
+    const auto colour = [](unsigned value) {
+        return std::array<std::uint8_t, 3>{static_cast<std::uint8_t>(value >> 16), static_cast<std::uint8_t>(value >> 8),
+                                           static_cast<std::uint8_t>(value)};
+    };
+    auto styles = developer_hoodie_detail::own_styles.load();
+    styles[item] = {static_cast<MarkMode>(mode == 4 ? 3 : mode), colour(from), colour(to), static_cast<std::uint8_t>(speed)};
+    if (mode == 4) styles[item].from = developer_hoodie_detail::standard_picks(*mark).first, styles[item].to = rainbow_marker;
+    // A solid colour whose unused second colour happens to be the rainbow's marker is not one.
+    else if (rainbow_style(styles[item])) styles[item].to[2] ^= 1;
+    developer_hoodie_detail::own_styles.store(styles);
+    profile_runtime::set_local_values({{"IdentityStyles", Json(developer_hoodie_detail::mark_styles_text(styles))}});
+    return std::string(mark_item_names[item]) +
+           (mode == 1 ? ": off." : mode == 2 ? ": your gradient." : mode == 3 ? ": your color." : mode == 4 ? ": rainbow."
+                                                                                                            : ": back to the usual.");
 }
 // Hidden chat still receives lines, so showing it again brings back the conversation.
 std::string edit_chat_visible(Session &s, std::string_view argument) {
@@ -352,6 +401,114 @@ std::string edit_chat_filter(Session &s, std::string_view argument) {
     profile_runtime::set_local_preference("ChatFilter", s.chat_filter);
     publish_chat(s);
     return s.chat_filter ? "Bad words in chat are hidden." : "Chat is shown unfiltered.";
+}
+std::string edit_player_distance(Session &s, std::string_view argument) {
+    float value{};
+    const auto parsed = std::from_chars(argument.data(), argument.data() + argument.size(), value);
+    if (parsed.ec != std::errc{} || parsed.ptr != argument.data() + argument.size() || !std::isfinite(value) ||
+        value < player_distance_least || value > player_distance_unlimited)
+        return "Player distance is a number of metres from 50 to 1000 (1000: every player).";
+    s.player_distance = value;
+    s.next_shown_rank = 0;
+    profile_runtime::set_local_values({{"PlayerDistance", static_cast<double>(value)}});
+    return value >= player_distance_unlimited ? std::string("Every player is shown as a skater, however far.")
+                                              : "Players within " + std::to_string(static_cast<int>(value)) + " m are shown as skaters.";
+}
+std::string start_pose_dump(Session &s, std::string_view argument) {
+    int seconds{};
+    const auto parsed = std::from_chars(argument.data(), argument.data() + argument.size(), seconds);
+    if (parsed.ec != std::errc{} || parsed.ptr != argument.data() + argument.size() || seconds < 1 || seconds > 600)
+        return "pose-dump <seconds> (1-600): records your own poses while in a session.";
+    std::error_code error;
+    const auto folder = std::filesystem::current_path(error) / "logs";
+    std::filesystem::create_directories(folder, error);
+    const auto file = folder / ("poses-" + std::to_string(now_us() / 1000000) + ".bin");
+    s.pose_dump.close();
+    s.pose_dump.clear();
+    s.pose_dump.open(file, std::ios::binary | std::ios::trunc);
+    if (!s.pose_dump) return "Could not write " + file.string() + ".";
+    s.pose_dump.write("RSPD1\n", 6);
+    s.pose_dump_until = now_us() + static_cast<std::uint64_t>(seconds) * 1000000;
+    s.pose_dump_count = 0;
+    return "Recording your poses for " + std::to_string(seconds) + " s to " + file.string() + ". Skate as you normally would.";
+}
+std::string edit_direct_connections(Session &s, std::string_view argument) {
+    const auto enabled = parse_switch(argument, s.prefer_direct);
+    if (!enabled) return "Use on, off, or toggle for direct connections.";
+    s.prefer_direct = *enabled;
+    profile_runtime::set_local_preference("DirectConnections", s.prefer_direct);
+    return s.prefer_direct ? "Servers that offer it are connected to directly (from the next join)."
+                                : "Every server is reached through Steam's relays (from the next join).";
+}
+std::string edit_nametag_distance(Session &s, std::string_view argument) {
+    float value{};
+    const auto parsed = std::from_chars(argument.data(), argument.data() + argument.size(), value);
+    if (parsed.ec != std::errc{} || parsed.ptr != argument.data() + argument.size() || !std::isfinite(value) ||
+        value < 10.f || value > 500.f)
+        return "Nametag distance is a number of metres from 10 to 500.";
+    s.nametag_distance = value;
+    profile_runtime::set_local_values({{"NametagDistance", static_cast<double>(value)}});
+    return "Names show within " + std::to_string(static_cast<int>(value)) + " m.";
+}
+std::string edit_nametag_dots(Session &s, std::string_view argument) {
+    const auto enabled = parse_switch(argument, s.nametag_dots);
+    if (!enabled) return "Use on, off, or toggle for nametag dots.";
+    s.nametag_dots = *enabled;
+    profile_runtime::set_local_preference("NametagDots", s.nametag_dots);
+    return s.nametag_dots ? "Far and off-screen players show as dots." : "No dots for far and off-screen players.";
+}
+std::string edit_nametags_friends(Session &s, std::string_view argument) {
+    const auto enabled = parse_switch(argument, s.nametags_friends);
+    if (!enabled) return "Use on, off, or toggle for friends-only nametags.";
+    s.nametags_friends = *enabled;
+    profile_runtime::set_local_preference("NametagsFriendsOnly", s.nametags_friends);
+    return s.nametags_friends ? "Only your Steam friends have nametags." : "Every player has a nametag.";
+}
+std::string edit_chat_bubbles(Session &s, std::string_view argument) {
+    const auto enabled = parse_switch(argument, s.chat_bubbles);
+    if (!enabled) return "Use on, off, or toggle for chat bubbles.";
+    s.chat_bubbles = *enabled;
+    s.display_preferences_loaded = true;
+    apply_nametags(s);
+    profile_runtime::set_local_preference("ChatBubbles", s.chat_bubbles);
+    return s.chat_bubbles ? "Chat bubbles show above skaters." : "Chat bubbles hidden.";
+}
+std::string edit_chat_bubbles_own(Session &s, std::string_view argument) {
+    const auto enabled = parse_switch(argument, s.chat_bubbles_own);
+    if (!enabled) return "Use on, off, or toggle for your own chat bubbles.";
+    s.chat_bubbles_own = *enabled;
+    profile_runtime::set_local_preference("ChatBubblesOwn", s.chat_bubbles_own);
+    return s.chat_bubbles_own ? "Your own messages show as bubbles too."
+                              : "Only other players' messages show as bubbles.";
+}
+std::string edit_chat_bubbles_distance(Session &s, std::string_view argument) {
+    float value{};
+    const auto parsed = std::from_chars(argument.data(), argument.data() + argument.size(), value);
+    if (parsed.ec != std::errc{} || parsed.ptr != argument.data() + argument.size() || !std::isfinite(value) ||
+        value < 5.f || value > 500.f)
+        return "Chat bubble distance is a number of metres from 5 to 500.";
+    s.chat_bubbles_distance = value;
+    profile_runtime::set_local_values({{"ChatBubblesDistance", static_cast<double>(value)}});
+    return "Chat bubbles show within " + std::to_string(static_cast<int>(value)) + " m.";
+}
+std::string edit_chat_bubbles_duration(Session &s, std::string_view argument) {
+    float value{};
+    const auto parsed = std::from_chars(argument.data(), argument.data() + argument.size(), value);
+    if (parsed.ec != std::errc{} || parsed.ptr != argument.data() + argument.size() || !std::isfinite(value) ||
+        value < 1.f || value > 30.f)
+        return "Chat bubble duration is a number of seconds from 1 to 30.";
+    s.chat_bubbles_duration = value;
+    profile_runtime::set_local_values({{"ChatBubblesDuration", static_cast<double>(value)}});
+    return "Chat bubbles last " + std::to_string(static_cast<int>(value)) + " seconds.";
+}
+std::string edit_chat_bubbles_history(Session &s, std::string_view argument) {
+    int value{};
+    const auto parsed = std::from_chars(argument.data(), argument.data() + argument.size(), value);
+    if (parsed.ec != std::errc{} || parsed.ptr != argument.data() + argument.size() || value < 1 || value > 8)
+        return "Chat bubble history is a number of lines from 1 to 8.";
+    s.chat_bubbles_history = value;
+    profile_runtime::set_local_values({{"ChatBubblesHistory", static_cast<std::int64_t>(value)}});
+    return "Chat bubbles stack up to " + std::to_string(value) + " recent line(s).";
 }
 std::string kick_player(Session &s, std::string_view argument) {
     if (s.mode != Mode::host) return "Only the session host can kick players.";
@@ -448,16 +605,25 @@ std::string send_admin(Session &s, std::string text) {
     if (!send_packet(s, s.host_id, request, true, false)) return "Could not reach the server.";
     return "Sent to the server.";
 }
+// The Special page's commands. They are a player's own offline as well, where their hoodie and
+// board still animate.
+bool own_mark_command(std::string_view action) {
+    return action == "mark-tag" || action == "mark-items" || action == "mark-style";
+}
 } // namespace
 bool queue_command(std::string_view action, std::string_view argument, std::string_view password) {
-    if (launcher::offline_mode()) return false;
+    if (launcher::offline_mode() && !own_mark_command(action)) return false;
     if ((action != "host" && action != "host-config" && action != "join" && action != "join-lobby" && action != "join-friend-lobby" && action != "stop" &&
-         action != "distances" && action != "object-placement" && action != "kick" && action != "clear-objects" &&
-         action != "party-overlay" && action != "nametags" && action != "nametag-style" && action != "chat-visible" && action != "chat-filter" &&
+         action != "distances" && action != "object-placement" && action != "object-limit" && action != "kick" && action != "clear-objects" &&
+         action != "nametags" && action != "chat-visible" && action != "chat-filter" &&
+         action != "nametag-distance" && action != "nametag-dots" && action != "nametags-friends" && action != "player-distance" && action != "direct-connections" && action != "pose-dump" &&
+         action != "chat-bubbles" && action != "chat-bubbles-own" && action != "chat-bubbles-distance" &&
+         action != "chat-bubbles-duration" && action != "chat-bubbles-history" &&
+         !own_mark_command(action) &&
          action != "voice" && action != "voice-mute" &&
          action != "voice-volume" && action != "voice-allow" && action != "voice-range" && action != "chat" && action != "ban" && action != "unban" &&
          action != "world-layer-sync" && action != "noclip-allow" && action != "nobail-allow" && action != "boosts-allow" &&
-         action != "tp" &&
+         action != "tuning-enforce" && action != "tp" &&
          action != "tpall" && action != "tphere" && action != "browse" &&
          action != "server" && action != "party") ||
         argument.size() > (action == "host" || action == "host-config" ? 160U : action == "chat" ? 4 * multiplayer_chat_max_bytes
@@ -477,7 +643,8 @@ bool queue_command(std::string_view action, std::string_view argument, std::stri
     return true;
 }
 std::string command(std::string_view action, std::string_view argument, std::string_view password) {
-    if (launcher::offline_mode()) return "Multiplayer is unavailable in offline mode. Start Steam and relaunch ReSkate.";
+    if (launcher::offline_mode() && !own_mark_command(action))
+        return "Multiplayer is unavailable in offline mode. Start Steam and relaunch ReSkate.";
     const bool configured_host = action == "host-config";
     if (configured_host) action = "host";
     PrivateRequest input;
@@ -488,7 +655,7 @@ std::string command(std::string_view action, std::string_view argument, std::str
         // their own: the same menu actions, sent to the server. "server" sends
         // any server console command.
         if (dedicated_host(s) && (action == "server" || (s.server_admin &&
-            (action == "distances" || action == "object-placement" || action == "voice-allow" || action == "voice-range" ||
+            (action == "distances" || action == "object-placement" || action == "object-limit" || action == "voice-allow" || action == "voice-range" ||
              action == "clear-objects" || action == "kick" || action == "ban" || action == "unban" ||
              action == "world-layer-sync" || action == "noclip-allow" || action == "nobail-allow" ||
              action == "tpall" || action == "tphere" || action == "boosts-allow" || action == "tuning-enforce")))) {
@@ -513,8 +680,8 @@ std::string command(std::string_view action, std::string_view argument, std::str
                 if (!result.empty()) add_chat(s, 0, "ReSkate", result);
                 return result;
             } else if (!dedicated_host(s) && verb == "p") {
-                // In a lobby everyone is in the one party: party chat is chat.
-                const auto refused = send_chat(s, rest);
+                // A lobby's host relays party chat, as a dedicated server does.
+                const auto refused = send_party_chat(s, rest);
                 if (!refused.empty() && (s.mode == Mode::host || s.mode == Mode::join)) add_chat(s, 0, "ReSkate", refused);
                 return refused.empty() ? "Message sent." : refused;
             } else if (!dedicated_host(s) && verb == "party") {
@@ -623,16 +790,22 @@ std::string command(std::string_view action, std::string_view argument, std::str
         // Host-only settings check the mode themselves; guests get a refusal.
         using Setting = std::string (*)(Session &, std::string_view);
         static constexpr std::pair<std::string_view, Setting> settings[] = {
-            {"object-placement", edit_object_placement}, {"kick", kick_player},
+            {"object-placement", edit_object_placement}, {"object-limit", edit_object_limit}, {"kick", kick_player},
             {"noclip-allow", edit_guest_noclip},           {"nobail-allow", edit_guest_no_bail},
             {"boosts-allow", edit_guest_boosts},           {"tuning-enforce", edit_enforce_tuning},
             {"score-check", edit_score_check},
             {"ban", ban_player},                           {"unban", unban_player},
             {"clear-objects", clear_guest_objects},
             {"world-layer-sync", edit_world_layer_sync},   {"distances", edit_distances},
-            {"party-overlay", edit_party_overlay},         {"nametags", edit_nametags},
-            {"nametag-style", edit_nametag_style},
-            {"chat-visible", edit_chat_visible}, {"chat-filter", edit_chat_filter}};
+            {"nametags", edit_nametags},
+            {"nametag-distance", edit_nametag_distance}, {"nametag-dots", edit_nametag_dots},
+            {"nametags-friends", edit_nametags_friends}, {"player-distance", edit_player_distance}, {"direct-connections", edit_direct_connections}, {"pose-dump", start_pose_dump},
+            {"mark-tag", edit_own_tag}, {"mark-items", edit_own_items}, {"mark-style", edit_mark_style},
+            {"chat-visible", edit_chat_visible}, {"chat-filter", edit_chat_filter},
+            {"chat-bubbles", edit_chat_bubbles}, {"chat-bubbles-own", edit_chat_bubbles_own},
+            {"chat-bubbles-distance", edit_chat_bubbles_distance},
+            {"chat-bubbles-duration", edit_chat_bubbles_duration},
+            {"chat-bubbles-history", edit_chat_bubbles_history}};
         for (const auto &[name, edit] : settings)
             if (action == name) {
                 s.status = edit(s, argument);
@@ -671,8 +844,12 @@ std::string command(std::string_view action, std::string_view argument, std::str
             return s.lobbies.status().browser;
         }
         if (action == "join-lobby" || action == "join-friend-lobby") {
-            if (s.mode != Mode::off) {
-                s.status = "Leave your current session before joining another lobby.";
+            // A guest can hop straight to a server or lobby they pick in the browser: they leave
+            // this one first. A host ends everyone's session by leaving, so they end it themselves;
+            // and a Steam friend's join offer, which can arrive unasked, never replaces a session.
+            if (s.mode != Mode::off && (s.mode != Mode::join || action != "join-lobby")) {
+                s.status = s.mode == Mode::join ? "Leave your current session before joining another lobby."
+                                                : "End your session before joining another lobby.";
                 publish(s);
                 return s.status;
             }
@@ -682,10 +859,27 @@ std::string command(std::string_view action, std::string_view argument, std::str
             const auto result = std::from_chars(argument.data(), argument.data() + argument.size(), id);
             if (result.ec != std::errc{} || result.ptr != argument.data() + argument.size() || !id)
                 return "Invalid lobby selection. Refresh the browser.";
-            // A dedicated server's row carries its join code.
+            if (s.mode == Mode::join) {
+                if (id == s.joined_public_lobby) return "You are already there.";
+                stop(s, "Switching servers...");
+            }
+            // A dedicated server's row carries its join code. It is a public listing like a
+            // lobby's: friends are told the player is there, and can follow them in.
             if (const auto *server = s.servers.find(id)) {
                 const auto code = server->code;
-                return command("join", code, input.password);
+                auto reply = command("join", code, input.password);
+                if (s.mode == Mode::join) {
+                    s.joined_public_lobby = id;
+                    publish(s);
+                }
+                return reply;
+            }
+            // A friend on a server this game has not listed yet: only the list has its code.
+            if (game_server_steam_id(id)) {
+                s.servers.refresh(now_us());
+                s.status = "That server is not in your server list yet. Open the server browser and join it there.";
+                publish(s);
+                return s.status;
             }
             if (!s.transport.open())
                 return s.transport.status().detail;
@@ -717,6 +911,8 @@ std::string command(std::string_view action, std::string_view argument, std::str
             publish(s);
             return s.status;
         };
+        // Joining is for the host or the server to refuse (a server may opt out of the bans).
+        if (action == "host" && reskate_banned(s.transport.status().local_id)) return refuse(std::string(banned_notice));
         if (action == "host") {
             const auto space = argument.find(' ');
             if (space != std::string_view::npos) {
@@ -755,6 +951,7 @@ std::string command(std::string_view action, std::string_view argument, std::str
             invitation = parse_invite(argument);
             if (!invitation)
                 return refuse("Invalid join code. Paste the complete SteamID-session code from the host.");
+            if (blocked_server(invitation->steam_id)) return refuse(std::string(blocked_server_notice));
         }
         stop(s, "Starting multiplayer...");
         s.chat.clear(); // A new session starts with an empty chat.
@@ -797,6 +994,7 @@ std::string command(std::string_view action, std::string_view argument, std::str
             apply_distances(s, remembered.distances);
             s.voice_range = remembered.voice_range;
             apply_object_placement(s, remembered.placement);
+            apply_object_limit(s, remembered.object_limit);
             apply_guest_tools(s, remembered.guest_noclip, remembered.guest_no_bail, remembered.guest_boosts);
             s.enforce_tuning = remembered.enforce_tuning;
             s.score_check = remembered.score_check;
@@ -808,7 +1006,22 @@ std::string command(std::string_view action, std::string_view argument, std::str
             save_host_preferences(s);
             s.status = "Hosting for up to " + std::to_string(capacity) + " players at " + std::to_string(s.tps) + " TPS.";
         } else {
-            if (!s.transport.join(invitation->steam_id)) {
+            // A server that listens on its own address is connected to directly, with Steam's
+            // relays as the fallback (steam_transport.h). The server sees the address of a
+            // player who connects this way, as any dedicated server does, so the player may
+            // turn it off (direct-connections). Preferences load with the first session frame,
+            // so read this one here.
+            const bool direct_allowed = s.display_preferences_loaded
+                                            ? s.prefer_direct
+                                            : profile_runtime::local_preference("DirectConnections").value_or(true);
+            std::uint32_t direct_ip{};
+            std::uint16_t direct_port{};
+            if (const auto *listed = s.servers.find(invitation->steam_id);
+                listed && direct_allowed && listed->direct_ip && listed->direct_port > 0) {
+                direct_ip = listed->direct_ip;
+                direct_port = static_cast<std::uint16_t>(listed->direct_port);
+            }
+            if (!s.transport.join(invitation->steam_id, direct_ip, direct_port)) {
                 s.status = s.transport.status().detail;
                 publish(s);
                 return s.status;

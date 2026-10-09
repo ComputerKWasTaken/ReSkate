@@ -34,6 +34,11 @@ void local_profile_before_level_transition(unsigned next) noexcept;
 using LocalLocationTravelQueue = bool (*)(const char* map);
 void set_local_location_travel_queue(LocalLocationTravelQueue) noexcept;
 std::uint32_t local_customization_selected_preset() noexcept;
+// Whether a saved outfit can be loaded yet: a cosmetics catalog has been read
+// this session to check it against, or nothing is saved. The game builds every
+// slot up to the selected one when a slot is selected and does not ask again,
+// so the first selection waits for this.
+bool local_customization_outfits_loadable() noexcept;
 void observe_local_customization_selection(std::int32_t index) noexcept;
 struct LocalMissionRow {
     std::string id, group;
@@ -55,9 +60,15 @@ bool queue_local_park_selection(const EditorSelectionRequest &);
 bool queue_local_park_paste(const EditorPasteRequest &);
 void tick_local_park_editor() noexcept;
 ControllerBindingsModel local_profile_controller_bindings();
+bool set_local_freecam_controller(bool);
+bool local_freecam_controller();
+bool set_local_freecam_controller_binding(std::uint32_t);
+bool set_local_freecam_binding(std::uint32_t);
+bool set_local_tp_to_freecam_binding(std::uint32_t);
 bool set_local_noclip_binding(std::uint32_t);
 bool set_local_forward_velocity_binding(std::uint32_t);
 bool set_local_up_velocity_binding(std::uint32_t);
+bool set_local_offboard_up_velocity_binding(std::uint32_t);
 bool set_local_object_persistence(bool enabled);
 bool clear_local_persisted_objects(std::string_view map);
 bool delete_local_placed_object(std::string_view map, std::uint64_t token);
@@ -65,6 +76,10 @@ bool teleport_to_local_placed_object(std::string_view map, std::uint64_t token);
 // Teleports the local skater to a world position (sent within 5 s, when the skater can be
 // moved). False when the game's teleport is unavailable.
 bool teleport_local_skater(const std::array<float, 3>& position);
+// The highest collision surface straight down at (x, z) between world heights `top` and
+// `bottom`, from the client physics world (the park editor's native ray). Empty when nothing
+// is there yet (collision still streaming) or the query is unavailable. Client update thread.
+std::optional<float> local_ground_height(float x, float z, float top, float bottom);
 // Small allowlisted progression commands, executed on the game update thread.
 bool set_local_progression(const std::vector<std::string>& arguments);
 // Small ReSkate-owned booleans saved beside the profile under a "ReSkate."

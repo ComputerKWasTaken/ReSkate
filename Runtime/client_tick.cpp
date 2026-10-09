@@ -10,6 +10,7 @@
 #include "Extension/UI/NativeMenu/native_menu.h"
 #include "Extension/Multiplayer/Hud/native_party.h"
 #include "Extension/Multiplayer/Hud/custom_nametags.h"
+#include "Extension/Multiplayer/developer_identity.h"
 #include "Extension/Multiplayer/Hud/follow_camera.h"
 #include "Engine/Game/UI/game_view.h"
 #include "Extension/Multiplayer/Steam/steam_friend_join.h"
@@ -24,6 +25,7 @@
 #include "Extension/Skater/client_source_spawn.h"
 #include "Extension/Skater/skater_slot_override.h"
 #include "Extension/Throwdowns/native_throwdowns.h"
+#include "Extension/Trainer/trainer.h"
 #include "Extension/World/level_loading.h"
 #include "Extension/World/loading_screen.h"
 #include <dxgi.h>
@@ -138,9 +140,11 @@ void apply_performance_settings() {
 // of older cards resetting the device while loading (DXGI_ERROR_DEVICE_RESET in
 // gameRendBeginFrame on an RX 580, 2026-10-03). A quarter of the card's dedicated memory, from
 // the game's own 520 MB up to 3.5 GiB (from 16 GB cards up); cards of 6 GB or less keep the
-// game's value.
+// game's value. Cards of up to 12 GB stop at 2 GiB: a quarter was 3 GiB of a 12 GB card, and
+// with a big map and texture mods on top the game ran out of video memory (E_OUTOFMEMORY from
+// CreateCommittedResource on an RTX 4070 SUPER, 2026-10-04).
 namespace mesh_pool {
-constexpr std::uint32_t stock_kb = 532960, most_kb = 3584u * 1024u;
+constexpr std::uint32_t stock_kb = 532960, most_kb = 3584u * 1024u, most_to_12gb_kb = 2048u * 1024u;
 static_assert((std::uint64_t{most_kb} + 24576u) * 1024u <= 0xffffffffull);
 struct Card { std::uint64_t memory{}; std::string name; };
 // The hardware adapter with the most dedicated memory: the one the game renders on (a laptop's
@@ -168,9 +172,11 @@ Card largest_card() {
 }
 // KiB for the pool on this card, or 0 to keep the game's own value.
 std::uint32_t size_kb(std::uint64_t memory) {
-    constexpr std::uint64_t six_gib = 6ull << 30, slack = 256ull << 20; // "6 GB" cards report a little under
+    // Cards report a little under or over their nominal size.
+    constexpr std::uint64_t six_gib = 6ull << 30, twelve_gib = 12ull << 30, slack = 256ull << 20;
     if (memory <= six_gib + slack) return 0;
-    return static_cast<std::uint32_t>(std::clamp<std::uint64_t>(memory / 4 / 1024, stock_kb, most_kb));
+    const auto most = memory <= twelve_gib + slack ? most_to_12gb_kb : most_kb;
+    return static_cast<std::uint32_t>(std::clamp<std::uint64_t>(memory / 4 / 1024, stock_kb, most));
 }
 }
 void apply_mesh_streaming_pool() {
@@ -369,18 +375,57 @@ void update_model(std::uintptr_t client, TickState& frame) {
     const auto camera_phase_ready = [&] { return camera_phase_issue() == nullptr; };
     std::optional<dingosdk::overlay::DebugRequest> debug_request;
     bool debug_busy{}, controller_busy{};
-    std::uint32_t noclip_combo{}, forward_velocity_combo{}, up_velocity_combo{};
+    std::uint32_t freecam_controller_combo{}, freecam_combo{}, tp_to_freecam_combo{}, noclip_combo{}, forward_velocity_combo{}, up_velocity_combo{}, offboard_up_velocity_combo{};
+    bool freecam_controller = dingosdk::local_freecam_controller();
     {
         std::lock_guard lock(r.mutex);
         debug_busy = r.requests.loading();
         controller_busy = !r.requests.idle();
+        freecam_controller_combo = r.model.bindings.available ? r.model.bindings.freecam_controller_combo : 0;
+        freecam_combo = r.model.bindings.available ? r.model.bindings.freecam_combo : 0;
+        tp_to_freecam_combo = r.model.bindings.available ? r.model.bindings.tp_to_freecam_combo : 0;
         noclip_combo = r.model.bindings.available ? r.model.bindings.noclip_combo : 0;
         forward_velocity_combo = r.model.bindings.available ? r.model.bindings.forward_velocity_combo : 0;
         up_velocity_combo = r.model.bindings.available ? r.model.bindings.up_velocity_combo : 0;
+        offboard_up_velocity_combo = r.model.bindings.available ? r.model.bindings.offboard_up_velocity_combo : 0;
         debug_request = r.requests.take<dingosdk::overlay::DebugRequest>(GetCurrentThreadId());
     }
+    // Capture belongs to the freecam state itself. Keep it active across brief
+    // request/loading phases instead of opening a path back to player input.
+    DingoSDKOverlaySetFreecamInputCapture(dingosdk::client_free_camera_active() && freecam_controller);
     dingosdk::ControllerInput controller;
-    if (noclip_combo || forward_velocity_combo || up_velocity_combo) DingoSDKOverlayReadControllerInput(&controller);
+    if (freecam_controller_combo || freecam_combo || tp_to_freecam_combo || noclip_combo || forward_velocity_combo || up_velocity_combo || offboard_up_velocity_combo) DingoSDKOverlayReadControllerInput(&controller);
+    
+    if (r.freecam_controller_bind_latch.update(freecam_controller_combo, controller, r.observer_failed || controller_busy || !r.debug_model.free_camera)) {
+        if (dingosdk::set_local_freecam_controller(!freecam_controller))
+            freecam_controller = !freecam_controller;
+        DingoSDKOverlaySetFreecamInputCapture(dingosdk::client_free_camera_active() && freecam_controller);
+        record("{\"event\":\"controller_binding_triggered\",\"action\":\"freecam_controller\"}");
+    }
+    
+    if (r.tp_to_freecam_bind_latch.update(tp_to_freecam_combo, controller, r.observer_failed || controller_busy || !r.debug_model.free_camera || !r.debug_model.camera_position_valid || debug_request.has_value())) {
+        if (dingosdk::teleport_local_skater(r.debug_model.camera_position)) {
+            std::lock_guard lock(r.mutex);
+            const dingosdk::overlay::DebugRequest request{dingosdk::overlay::DebugAction::set_free_camera, false};
+            if (r.requests.enqueue(request, request_context(r), GetCurrentThreadId()))
+                debug_request = r.requests.take<dingosdk::overlay::DebugRequest>(GetCurrentThreadId());
+        }
+        record("{\"event\":\"controller_binding_triggered\",\"action\":\"tp_to_freecam\"}");
+    }
+    
+    const bool freecam_bind_blocked = r.observer_failed || controller_busy || debug_request.has_value() ||
+        (state != 13 && state != 21) || !r.debug_model.camera_available ||
+        (freecam_combo && !camera_phase_ready());
+    if (r.freecam_bind_latch.update(freecam_combo, controller, freecam_bind_blocked)) {
+        {
+            std::lock_guard lock(r.mutex);
+            const dingosdk::overlay::DebugRequest request{dingosdk::overlay::DebugAction::set_free_camera, !r.debug_model.free_camera};
+            if (r.requests.enqueue(request, request_context(r), GetCurrentThreadId()))
+                debug_request = r.requests.take<dingosdk::overlay::DebugRequest>(GetCurrentThreadId());
+        }
+        record("{\"event\":\"controller_binding_triggered\",\"action\":\"freecam\"}");
+    }
+
     const bool bind_blocked = r.observer_failed || controller_busy || debug_request.has_value() ||
         (state != 13 && state != 21) || !r.debug_model.noclip_available ||
         (noclip_combo && !camera_phase_ready());
@@ -395,6 +440,8 @@ void update_model(std::uintptr_t client, TickState& frame) {
         record("{\"event\":\"controller_binding_triggered\",\"action\":\"noclip\"}");
     }
     const bool forward_velocity_blocked = r.observer_failed || controller_busy || debug_request.has_value() ||
+        (r.debug_model.offboard_up_velocity_available && forward_velocity_combo == offboard_up_velocity_combo) ||
+        (r.debug_model.free_camera && freecam_controller) ||
         (state != 13 && state != 21) || !r.debug_model.forward_velocity_available ||
         (forward_velocity_combo && forward_velocity_combo == noclip_combo);
     if (r.forward_velocity_bind_latch.update(forward_velocity_combo, controller, forward_velocity_blocked)) {
@@ -407,6 +454,8 @@ void update_model(std::uintptr_t client, TickState& frame) {
         record("{\"event\":\"controller_binding_triggered\",\"action\":\"forward_velocity\"}");
     }
     const bool up_velocity_blocked = r.observer_failed || controller_busy || debug_request.has_value() ||
+        (r.debug_model.offboard_up_velocity_available && up_velocity_combo == offboard_up_velocity_combo) ||
+        (r.debug_model.free_camera && freecam_controller) ||
         (state != 13 && state != 21) || !r.debug_model.up_velocity_available ||
         (up_velocity_combo && (up_velocity_combo == noclip_combo || up_velocity_combo == forward_velocity_combo));
     if (r.up_velocity_bind_latch.update(up_velocity_combo, controller, up_velocity_blocked)) {
@@ -417,6 +466,19 @@ void update_model(std::uintptr_t client, TickState& frame) {
             record("{\"event\":\"controller_binding_triggered\",\"action\":\"up_velocity\"}");
         }
     }
+
+    const bool offboard_up_velocity_blocked = r.observer_failed || controller_busy || debug_request.has_value() ||
+        (r.debug_model.free_camera && freecam_controller) ||
+        (state != 13 && state != 21) || !r.debug_model.offboard_up_velocity_available ||
+        (offboard_up_velocity_combo && offboard_up_velocity_combo == noclip_combo);
+    if (r.offboard_up_velocity_bind_latch.update(offboard_up_velocity_combo, controller, offboard_up_velocity_blocked)) {
+        std::lock_guard lock(r.mutex);
+        const dingosdk::overlay::DebugRequest request{dingosdk::overlay::DebugAction::add_offboard_up_velocity};
+        if (r.requests.enqueue(request, request_context(r), GetCurrentThreadId())) {
+            debug_request = r.requests.take<dingosdk::overlay::DebugRequest>(GetCurrentThreadId());
+            record("{\"event\":\"controller_binding_triggered\",\"action\":\"offboard_up_velocity\"}");
+        }
+    }
     if (debug_request || r.debug_model.free_camera || r.debug_model.first_person || r.debug_model.noclip ||
         now >= r.next_debug) {
         ScheduledWorkScope work{r, debug_request.has_value()};
@@ -424,11 +486,13 @@ void update_model(std::uintptr_t client, TickState& frame) {
         const bool debug_ready = !r.observer_failed && !debug_busy && (state == 13 || state == 21) && native_context_ready();
         dingosdk::overlay::FlightInput flight_input;
         DingoSDKOverlayReadFlightInput(&flight_input, (r.debug_model.free_camera || r.debug_model.noclip) && debug_ready,
-            r.debug_model.noclip);
+            r.debug_model.noclip || (r.debug_model.free_camera && freecam_controller));
         const auto phase_issue = camera_phase_issue();
         auto debug = dingosdk::on_client_debug_tick(r.base, client, debug_ready,
             phase_issue == nullptr,
             debug_request ? &*debug_request : nullptr, &flight_input);
+        // Input ownership must follow the live camera even with every overlay closed.
+        DingoSDKOverlaySetFreecamInputCapture(dingosdk::client_free_camera_active() && freecam_controller);
         // A debug action, or a mode the tick ended by itself (host policy, lost
         // camera), can have replaced the native camera: validate it again.
         if (debug_request || debug.free_camera != r.debug_model.free_camera ||
@@ -464,6 +528,8 @@ void update_model(std::uintptr_t client, TickState& frame) {
             record("{\"event\":\"forward_velocity_applied\",\"count\":" + std::to_string(debug.forward_velocity_updates) + "}");
         if (debug.up_velocity_updates != r.debug_model.up_velocity_updates)
             record("{\"event\":\"up_velocity_applied\",\"count\":" + std::to_string(debug.up_velocity_updates) + "}");
+        if (debug.offboard_up_velocity_updates != r.debug_model.offboard_up_velocity_updates)
+            record("{\"event\":\"offboard_up_velocity_applied\",\"count\":" + std::to_string(debug.offboard_up_velocity_updates) + "}");
         if (r.debug_model.noclip && !debug.noclip && !debug_request) {
             std::ostringstream stopped;
             stopped << "{\"event\":\"noclip_stopped\",\"reason\":" << std::quoted(debug.status) << '}';
@@ -500,11 +566,17 @@ void update_model(std::uintptr_t client, TickState& frame) {
         r.next_offline = now + 500;
         auto offline = dingosdk::update_gameplay_settings_override(
             offline_request ? &*offline_request : nullptr);
-        if (offline_request)
+        if (offline_request) {
+            using dingosdk::overlay::OfflineFeatureGroup;
+            if (offline_request->group == OfflineFeatureGroup::board_wear)
+                dingosdk::profile_runtime::set_local_preference("BoardWear", offline_request->enabled);
+            else if (offline_request->group == OfflineFeatureGroup::restore_all)
+                dingosdk::profile_runtime::set_local_preference("BoardWear", false);
             dingosdk::logging::printf(dingosdk::logging::Level::info, dingosdk::logging::Channel::runtime,
                 "Offline feature %d -> %d applied: %s (board wear available %d, effective %d).",
                 static_cast<int>(offline_request->group), offline_request->enabled, offline.model.status.c_str(),
                 offline.model.board_wear.available, offline.model.board_wear.effective);
+        }
         auto slot_action = dingosdk::SkaterSlotOverrideAction::tick;
         if (offline_request &&
             offline_request->group == dingosdk::overlay::OfflineFeatureGroup::restore_all)
@@ -516,19 +588,27 @@ void update_model(std::uintptr_t client, TickState& frame) {
         }
         // Saved access owns these prerequisites. This runs on the recorded
         // game-update thread and reacquires/validates each native settings object.
-        const auto enable_saved_feature = [&](const char* name, bool requested) {
+        const auto enable_saved_feature = [&](const char* name, bool requested, const char* reapplied_log = nullptr) {
             if (!requested) return;
             const auto variable = std::find_if(offline.model.variables.begin(), offline.model.variables.end(),
                 [&](const auto& field) { return field.name == name; });
-            if (variable != offline.model.variables.end() && variable->available && !variable->value)
+            if (variable != offline.model.variables.end() && variable->available && !variable->value) {
                 offline = dingosdk::update_gameplay_engine_variable({name, dingosdk::EngineVariableAction::set, true});
+                if (reapplied_log)
+                    dingosdk::logging::printf(dingosdk::logging::Level::info, dingosdk::logging::Channel::runtime,
+                        "%s", reapplied_log);
+            }
         };
         enable_saved_feature("FastTravelPointsEnabled", profile_access.bus_stops);
         enable_saved_feature("EnableNeighborhoodRank", profile_access.neighborhoods || profile_access.neighborhood_ranks);
         enable_saved_feature("EnableCASArtistSandbox", profile_access.cosmetics);
         enable_saved_feature("EnableMyStuffMenu", profile_access.cosmetics);
+        enable_saved_feature("BoardWearEnabled",
+            dingosdk::profile_runtime::local_preference("BoardWear").value_or(false),
+            "Re-applied saved board wear preference (BoardWearEnabled).");
         if (profile_access.preset_slots) slot_action = dingosdk::SkaterSlotOverrideAction::enable;
-        const auto slots = dingosdk::update_skater_slot_override(slot_action, dingosdk::local_customization_selected_preset());
+        const auto slots = dingosdk::update_skater_slot_override(slot_action, dingosdk::local_customization_selected_preset(),
+            dingosdk::local_customization_outfits_loadable());
         if (slots.manager_available && slots.ui_ready)
             dingosdk::observe_local_customization_selection(slots.selected_slot);
         const bool missions_requested = offline.model.activities.available &&
@@ -891,6 +971,7 @@ void update_model(std::uintptr_t client, TickState& frame) {
     // Validated afresh for the restore, which may itself change the camera.
     frame.camera_issue.reset();
     const bool restored = dingosdk::restore_client_debug(r.base, client, camera_phase_ready());
+    DingoSDKOverlaySetFreecamInputCapture(false);
     frame.camera_issue.reset();
     if (!restored) {
         std::lock_guard lock(r.mutex);
@@ -984,7 +1065,10 @@ void tick(std::uintptr_t client, std::uintptr_t update) {
         {
             DINGO_PROFILE_ZONE("tick/multiplayer");
             dingosdk::multiplayer::tick(r.base,client,multiplayer_ready,r.multiplayer_map,load_multiplayer_map);
+            if (auto notice = dingosdk::multiplayer::take_leave_notice(); !notice.empty())
+                dingosdk::overlay::notify(dingosdk::overlay::NoticeLevel::warning, "Map not installed", std::move(notice));
         }
+        dingosdk::multiplayer::refresh_identity_lists();
         dingosdk::tick_local_developer_hoodie(r.base, client, multiplayer_ready);
         dingosdk::tick_local_developer_board(r.base, client, multiplayer_ready);
         // The session spawns and places skaters and can teleport: check the camera again.
@@ -1011,6 +1095,11 @@ void tick(std::uintptr_t client, std::uintptr_t update) {
         {
             DINGO_PROFILE_ZONE("tick/AI skaters");
             dingosdk::ai_skaters::tick(r.base,client,multiplayer_ready);
+        }
+        {
+            DINGO_PROFILE_ZONE("tick/trainer");
+            // A custom map is a sublevel of the root level: that is the map the player means.
+            dingosdk::trainer::tick(r.base, client, multiplayer_ready, r.catalog_level.empty() ? r.last_level : r.catalog_level);
         }
         {
             DINGO_PROFILE_ZONE("tick/Steam friend join");

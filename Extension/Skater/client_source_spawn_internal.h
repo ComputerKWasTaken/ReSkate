@@ -128,14 +128,18 @@ struct InteractiveDebug {
         ULONGLONG expires{};
         std::array<float, 3> velocity{};
         bool valid{};
+        bool applied{};
     } noclip_velocity;
     VelocityRequest forward_velocity;
     VelocityRequest up_velocity;
+    VelocityRequest offboard_up_velocity;
     std::uint64_t noclip_velocity_updates{}, noclip_motion_updates{};
     std::uint64_t forward_velocity_updates{};
     float forward_velocity_speed = 20.0f;
     std::uint64_t up_velocity_updates{};
+    std::uint64_t offboard_up_velocity_updates{};
     float up_velocity_speed = 20.0f;
+    float offboard_up_velocity_speed = 20.0f;
     float noclip_altitude{};
     bool noclip_altitude_valid{}, noclip_altitude_offboard{};
     // Player choices kept in the local profile (see load_saved_debug):
@@ -163,6 +167,8 @@ struct SourceState {
     std::atomic_flag busy = ATOMIC_FLAG_INIT;
     bool velocity_guard_attempted{}; // Protected by initialization_mutex.
     std::atomic<bool> velocity_guard_active{};
+    std::atomic<bool> free_camera_active{};
+    std::atomic<std::uintptr_t> offboard_boost_core{};
     std::atomic<SourcePhysicsUpdate> velocity_update_original{};
     std::atomic<SourceSkaterMotion> motion_original{};
     SourceTrial trial;
@@ -177,6 +183,7 @@ struct NoclipBodies {
     std::uintptr_t core{}, context{}, rig_wrapper{};
     float seconds{}, board_height{};
     bool offboard{};
+    bool wipeout{}; // Spread-eagle/torpedo use the native wipeout physics path.
     std::array<float, 3> root{}; // Entity root: the camera target and the idle motion target.
     std::array<std::uintptr_t, 32> parts{}; // Board 0..8, native skeleton velocity parts 1..23.
 };
