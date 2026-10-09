@@ -17,7 +17,6 @@
 namespace dingosdk::overlay::detail {
 // Window messages do not cover the game's independently polled input devices.
 // Only the overlay's own Win32 backend and binding reader may bypass these gates.
-thread_local unsigned overlay_input_access = 0;
 thread_local HRAWINPUT noted_raw_input = nullptr;
 bool block_polled_input() {
     const auto error = GetLastError();

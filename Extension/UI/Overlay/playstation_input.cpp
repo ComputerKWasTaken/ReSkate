@@ -13,6 +13,9 @@
 #include <vector>
 
 namespace dingosdk::overlay::detail {
+// Here rather than in input_capture.cpp: this reader is also built on its own, without the
+// rest of the overlay.
+thread_local unsigned overlay_input_access = 0;
 namespace {
 struct Pad {
     std::wstring path;
