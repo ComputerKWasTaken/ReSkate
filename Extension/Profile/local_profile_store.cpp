@@ -311,4 +311,15 @@ void Store::save_park_choice(unsigned lot, std::string_view id) {
 
 }
 
+void Store::save_park_choices(const ParkChoices& choices) {
+    for (unsigned lot = 0; lot < choices.size(); ++lot)
+        require(valid_park(lot, choices[lot]), "Unknown park layout for this lot");
+    std::lock_guard lock(mutex_);
+    if (park_choices(value_) == choices) return;
+    Update update(*this);
+    for (unsigned lot = 0; lot < choices.size(); ++lot)
+        update.json(value_.settings, {"parks", park_lots[lot].key}) = choices[lot];
+    update.commit();
+}
+
 }
