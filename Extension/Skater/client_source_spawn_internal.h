@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cstring>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -102,6 +103,10 @@ struct InteractiveDebug {
     // Shares Freecam's owned mode-1 camera; each tick publishes the head pose
     // instead of a flight step.
     bool first_person{}, first_person_waiting{};
+    // "Third person on foot": first person handed the camera back while the
+    // skater walks and takes it again once they are back on the board.
+    bool first_person_paused{}, first_person_last_on_foot{};
+    ULONGLONG first_person_foot_since{}, first_person_retry_after{};
     // FreeCamera vertical FOV (+0xac): chosen value (0 = unchanged) and the value
     // it held before first person took it, restored when first person ends.
     float first_person_fov{}, first_person_saved_fov{};
@@ -222,6 +227,8 @@ bool first_person_write_fov(std::uintptr_t camera, float fov) noexcept;
 void first_person_restore_fov(InteractiveDebug& debug) noexcept;
 void free_camera_restore_fov(InteractiveDebug& debug) noexcept;
 std::uintptr_t first_person_component(std::uintptr_t base, std::uintptr_t client);
+// Whether the local skater is walking (physics state Offboard); empty if unreadable.
+std::optional<bool> first_person_on_foot(std::uintptr_t base, std::uintptr_t client) noexcept;
 first_person::Vec3 first_person_head_matrix(std::uintptr_t base, std::uintptr_t component, std::array<float, 16>& matrix);
 void first_person_on_render(std::uintptr_t animation_interface) noexcept;
 void first_person_on_animation(std::uintptr_t component) noexcept;
